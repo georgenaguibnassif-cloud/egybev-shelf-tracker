@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/Share_of_Shelf_Tracker.html" }
+  ]
+}
