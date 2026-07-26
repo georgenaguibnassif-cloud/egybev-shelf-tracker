@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Share of Shelf Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root {
     --heineken: #00994d;
@@ -316,6 +317,7 @@
   .remove-row-btn:hover { color: var(--ours); }
   .form-actions { display: flex; gap: 10px; margin-top: 4px; }
   .error-msg { color: var(--ours); font-size: 0.85rem; margin-top: 10px; min-height: 1.1em; }
+  .error-msg.success-msg { color: var(--heineken); }
 
   .section-title { font-size: 1rem; margin: 0 0 14px 0; color: var(--text); }
   .note-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
@@ -432,17 +434,18 @@
     z-index: 1000;
     padding: 20px;
   }
-  #lockScreen input[type="password"] { width: 100%; margin-bottom: 12px; text-align: center; letter-spacing: 0.2em; font-size: 1.2rem; }
+  #lockScreen input[type="email"], #lockScreen input[type="password"] { width: 100%; margin-bottom: 12px; }
   #lockScreen .btn { width: 100%; }
 </style>
 </head>
 <body>
 <div id="lockScreen">
   <div class="card" style="max-width:320px; width:100%;">
-    <h2 class="section-title">Enter Passcode</h2>
-    <input type="password" id="passcodeInput" inputmode="numeric" placeholder="Passcode" autocomplete="off">
-    <button id="unlockBtn" class="btn btn-primary" type="button">Unlock</button>
-    <div class="error-msg" id="passcodeError"></div>
+    <h2 class="section-title">Sign in</h2>
+    <input type="email" id="loginEmail" placeholder="Email" autocomplete="username">
+    <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
+    <button id="loginBtn" class="btn btn-primary" type="button">Sign in</button>
+    <div class="error-msg" id="loginError"></div>
   </div>
 </div>
 <div class="wrap">
@@ -453,6 +456,15 @@
   <div class="subtitle">Pick an account to see its EgyBev vs. ABC SKU split and pricing.</div>
 
   <div class="controls">
+    <select id="accountManagerFilter">
+      <option value="">Select Account Manager</option>
+    </select>
+    <select id="accountRegionFilter">
+      <option value="">Select Region</option>
+      <option value="El Gouna">El Gouna</option>
+      <option value="Cairo">Cairo</option>
+      <option value="North Coast">North Coast</option>
+    </select>
     <select id="accountSelect">
       <option value="">Select an account…</option>
     </select>
@@ -484,6 +496,7 @@
     <button id="searchSkuBtn" class="btn" type="button">Search SKU</button>
     <button id="createOrderBtn" class="btn" type="button">Create Order</button>
     <button id="exportBtn" class="btn" type="button">Export</button>
+    <button id="changePasswordBtn" class="btn" type="button">Change Password</button>
     <button id="logoutBtn" class="btn" type="button">Log out</button>
   </div>
 
@@ -578,11 +591,8 @@
         <label for="editAccountRegion">Region</label>
         <select id="editAccountRegion">
           <option value="El Gouna">El Gouna</option>
-          <option value="Hurghada">Hurghada</option>
-          <option value="Sahl Hasheesh">Sahl Hasheesh</option>
-          <option value="Marsa Alam">Marsa Alam</option>
-          <option value="Sharm El Sheikh">Sharm El Sheikh</option>
           <option value="Cairo">Cairo</option>
+          <option value="North Coast">North Coast</option>
         </select>
       </div>
       <div class="form-group">
@@ -610,6 +620,23 @@
       <button id="cancelAccountDetailsBtn" class="btn" type="button">Cancel</button>
     </div>
     <div class="error-msg" id="accountDetailsError"></div>
+  </div>
+
+  <div class="card" id="changePasswordPanel" style="display:none;">
+    <h2>Change Password</h2>
+    <div class="form-group">
+      <label for="newPasswordInput">New Password</label>
+      <input type="password" id="newPasswordInput" autocomplete="new-password">
+    </div>
+    <div class="form-group">
+      <label for="confirmPasswordInput">Confirm New Password</label>
+      <input type="password" id="confirmPasswordInput" autocomplete="new-password">
+    </div>
+    <div class="form-actions">
+      <button id="saveNewPasswordBtn" class="btn btn-primary" type="button">Save New Password</button>
+      <button id="cancelChangePasswordBtn" class="btn" type="button">Cancel</button>
+    </div>
+    <div class="error-msg" id="changePasswordError"></div>
   </div>
 
   <div class="card" id="exportPdfPanel" style="display:none;">
@@ -642,20 +669,24 @@
 <script>
 const SUPABASE_URL = 'https://ldumqsjlsdycovtuirwq.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_j8XHZMsyHBx-IuOQKxj0KQ_4EYofaMM';
-const EDITOR_PASSCODE = '1122';
-const VIEWER_PASSCODE = '0001';
-const LOCK_KEY = 'skuTracker_unlocked_v1';
-const ROLE_KEY = 'skuTracker_role_v1';
-const UNLOCK_TIME_KEY = 'skuTracker_unlockedAt_v1';
-const SESSION_DURATION_MS = 8 * 60 * 60 * 1000; // 8 hours
-let userRole = 'viewer';
-function isEditor() { return userRole === 'editor'; }
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// Every signed-in user (Rep or Manager) has full read/write within whatever
+// accounts RLS actually returns to them — there's no more read-only role, so
+// this always returns true once logged in. Kept as a named function so the
+// ~14 existing call sites throughout the file don't need to change.
+function isEditor() { return !!currentProfile; }
 
 async function sb(path, opts) {
   opts = opts || {};
+  // Always send the logged-in user's access token so RLS can identify them —
+  // the anon-key fallback here is a dead-code safety net, never actually hit
+  // in practice, since startApp() (and therefore every real sb() call) only
+  // ever runs after a session is confirmed to exist.
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const token = session ? session.access_token : SUPABASE_KEY;
   const headers = Object.assign({
     'apikey': SUPABASE_KEY,
-    'Authorization': 'Bearer ' + SUPABASE_KEY,
+    'Authorization': 'Bearer ' + token,
     'Content-Type': 'application/json'
   }, opts.headers || {});
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, Object.assign({}, opts, { headers }));
@@ -1094,9 +1125,11 @@ async function uploadPhotoToStorage(path, photo, opts) {
   opts = opts || {};
   const dataUrl = `data:${photo.mediaType};base64,${photo.data}`;
   const blob = await (await fetch(dataUrl)).blob();
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const token = session ? session.access_token : SUPABASE_KEY;
   const headers = {
     apikey: SUPABASE_KEY,
-    Authorization: 'Bearer ' + SUPABASE_KEY,
+    Authorization: 'Bearer ' + token,
     'Content-Type': photo.mediaType
   };
   if (opts.upsert) headers['x-upsert'] = 'true';
@@ -1232,6 +1265,8 @@ function fmtNoteDate(iso) {
 
 const select = document.getElementById('accountSelect');
 const accountTypeFilterEl = document.getElementById('accountTypeFilter');
+const accountManagerFilterEl = document.getElementById('accountManagerFilter');
+const accountRegionFilterEl = document.getElementById('accountRegionFilter');
 const skuFilterDropdown = document.getElementById('skuFilterDropdown');
 const skuFilterToggleBtn = document.getElementById('skuFilterToggleBtn');
 const skuFilterPanel = document.getElementById('skuFilterPanel');
@@ -1259,6 +1294,10 @@ const editAccountType = document.getElementById('editAccountType');
 const editAccountPayment = document.getElementById('editAccountPayment');
 const editAccountManager = document.getElementById('editAccountManager');
 const accountDetailsError = document.getElementById('accountDetailsError');
+const changePasswordPanel = document.getElementById('changePasswordPanel');
+const newPasswordInput = document.getElementById('newPasswordInput');
+const confirmPasswordInput = document.getElementById('confirmPasswordInput');
+const changePasswordError = document.getElementById('changePasswordError');
 const newSkuRows = document.getElementById('newSkuRows');
 const addRowBtn = document.getElementById('addRowBtn');
 const saveMenuBtn = document.getElementById('saveMenuBtn');
@@ -1404,12 +1443,36 @@ function updateCategoryCheckboxState() {
   categoryFilterEl.style.opacity = disabled ? '0.5' : '';
 }
 
-// Single source of truth for "which accounts does the active Type filter leave in scope" —
-// used everywhere account lists get built (account dropdown, Overview, Search SKU, the
-// no-account-selected view) so the filter behaves consistently across the whole app.
+// Manager-only filter — a Rep only ever sees their own accounts anyway (RLS-scoped), so
+// filtering by manager is meaningless for them; Managers use it to narrow the full account
+// list down to one rep's accounts. Options are every Rep in `profiles` (role=rep only —
+// Managers aren't account-manager assignees themselves, so they're excluded here) so a rep
+// shows up the moment their login exists, not only once they've added their first account.
+// Only a Manager's own session can actually read the full profiles list (RLS), which is fine
+// since this dropdown is hidden for Reps anyway.
+async function rebuildAccountManagerFilter() {
+  const currentVal = accountManagerFilterEl.value;
+  const rows = await sb('profiles?select=display_name&role=eq.rep&order=display_name');
+  const names = rows.map(r => r.display_name);
+  accountManagerFilterEl.innerHTML = '<option value="">Select Account Manager</option>' +
+    names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+  if (names.includes(currentVal)) accountManagerFilterEl.value = currentVal;
+}
+
+// Single source of truth for "which accounts do the active Type/Manager/Region filters leave
+// in scope" — used everywhere account lists get built (account dropdown, Overview, Search SKU,
+// the no-account-selected view) so the filters behave consistently across the whole app.
 function accountsForTypeFilter() {
   const typeFilter = accountTypeFilterEl.value;
-  return Object.keys(DATA.accounts).filter(n => !typeFilter || (ACCOUNT_INFO[n] && ACCOUNT_INFO[n].type === typeFilter));
+  const managerFilter = accountManagerFilterEl.value;
+  const regionFilter = accountRegionFilterEl.value;
+  return Object.keys(DATA.accounts).filter(n => {
+    const info = ACCOUNT_INFO[n];
+    if (typeFilter && (!info || info.type !== typeFilter)) return false;
+    if (managerFilter && (!info || info.accountManager !== managerFilter)) return false;
+    if (regionFilter && (!info || info.region !== regionFilter)) return false;
+    return true;
+  });
 }
 
 function populateAccountSelect(selectedValue) {
@@ -2692,6 +2755,20 @@ accountTypeFilterEl.addEventListener('change', () => {
   updateModeUI();
   render();
 });
+accountManagerFilterEl.addEventListener('change', () => {
+  closeSecondaryPanels();
+  select.value = '';
+  populateAccountSelect('');
+  updateModeUI();
+  render();
+});
+accountRegionFilterEl.addEventListener('change', () => {
+  closeSecondaryPanels();
+  select.value = '';
+  populateAccountSelect('');
+  updateModeUI();
+  render();
+});
 byGlassFilterEl.addEventListener('change', () => {
   updateCategoryCheckboxState();
   render();
@@ -3290,7 +3367,7 @@ saveMenuBtn.addEventListener('click', async () => {
   const region = 'El Gouna';
   const type = 'Outlets';
   const payment = 'Credit';
-  const accountManager = 'George Naguib';
+  const accountManager = currentProfile.display_name;
 
   saveMenuBtn.disabled = true;
   const savingLabel = wasEditing ? 'Saving Changes…' : 'Saving…';
@@ -3304,10 +3381,9 @@ saveMenuBtn.addEventListener('click', async () => {
       menuFileUrlToSave = await uploadPhotoToStorage(`menus/${encodeURIComponent(name)}.${ext}`, pendingMenuFile, { upsert: true });
     }
 
-    await sb(`skus?account_name=eq.${encodeURIComponent(wasEditing ? oldName : name)}`, { method: 'DELETE' });
-    await sb('skus', { method: 'POST', body: JSON.stringify(items.map(it => toSkuRow(name, it))) });
-
     if (wasEditing) {
+      await sb(`skus?account_name=eq.${encodeURIComponent(oldName)}`, { method: 'DELETE' });
+      await sb('skus', { method: 'POST', body: JSON.stringify(items.map(it => toSkuRow(name, it))) });
       // Region/Type/Payment/Manager and renaming are owned by "Edit Account Details" now —
       // this save only ever needs to touch is_edited/menu_file_url here.
       const metaPatch = {};
@@ -3320,13 +3396,18 @@ saveMenuBtn.addEventListener('click', async () => {
         });
       }
     } else {
+      // accounts_meta must be created BEFORE the skus rows below — RLS authorizes each skus
+      // write by checking ownership of the matching accounts_meta row, which doesn't exist
+      // yet until this POST runs.
       await sb('accounts_meta', {
         method: 'POST',
         body: JSON.stringify({
           account_name: name, is_custom: true, is_edited: false, menu_file_url: menuFileUrlToSave,
-          region, type, payment, account_manager: accountManager
+          region, type, payment, account_manager: accountManager, owner_id: currentProfile.id
         })
       });
+      await sb(`skus?account_name=eq.${encodeURIComponent(name)}`, { method: 'DELETE' });
+      await sb('skus', { method: 'POST', body: JSON.stringify(items.map(it => toSkuRow(name, it))) });
       for (const c of pendingNewContacts) {
         await addContact(name, c.name, c.role, c.phone);
       }
@@ -3357,6 +3438,7 @@ saveMenuBtn.addEventListener('click', async () => {
 
   populateAccountSelect(name);
   rebuildCategoryFilter();
+  await rebuildAccountManagerFilter();
   addMenuPanel.style.display = 'none';
   editingAccount = null;
   saveMenuBtn.disabled = false;
@@ -3390,6 +3472,9 @@ function closeSecondaryPanels() {
   if (exportPdfPanel.style.display === 'block') {
     exportPdfPanel.style.display = 'none';
     exportingPdfAccount = null;
+  }
+  if (changePasswordPanel.style.display === 'block') {
+    changePasswordPanel.style.display = 'none';
   }
   exportMenuRow.style.display = 'none';
 }
@@ -3535,23 +3620,19 @@ document.getElementById('saveAccountDetailsBtn').addEventListener('click', async
   try {
     if (isRenaming) {
       // Rename in place everywhere the account name is referenced — this never touches the
-      // SKU/menu content itself, only which account each row belongs to.
-      await sb(`skus?account_name=eq.${encodeURIComponent(oldName)}`, {
-        method: 'PATCH', body: JSON.stringify({ account_name: name })
-      });
-      await sb(`sku_originals?account_name=eq.${encodeURIComponent(oldName)}`, {
-        method: 'PATCH', body: JSON.stringify({ account_name: name })
-      });
-      await sb(`notes?account_name=eq.${encodeURIComponent(oldName)}`, {
-        method: 'PATCH', body: JSON.stringify({ account_name: name })
-      });
-      await sb(`contacts?account_name=eq.${encodeURIComponent(oldName)}`, {
-        method: 'PATCH', body: JSON.stringify({ account_name: name })
+      // SKU/menu content itself, only which account each row belongs to. Done as a single
+      // atomic RPC (rather than four separate PATCHes) so the rename can't be left half-applied
+      // partway through, and so RLS only has to authorize it once at the top rather than
+      // re-checking ownership against a row that's mid-rename on every individual table PATCH.
+      await sb('rpc/rename_account', {
+        method: 'POST',
+        body: JSON.stringify({ old_name: oldName, new_name: name })
       });
     }
     const metaPatch = { region, type, payment, account_manager: accountManager };
-    if (isRenaming) metaPatch.account_name = name;
-    await sb(`accounts_meta?account_name=eq.${encodeURIComponent(oldName)}`, {
+    // rename_account() above already renamed accounts_meta too, so this PATCH must target the
+    // NEW name once a rename happened — oldName no longer exists as a row by this point.
+    await sb(`accounts_meta?account_name=eq.${encodeURIComponent(isRenaming ? name : oldName)}`, {
       method: 'PATCH',
       body: JSON.stringify(metaPatch)
     });
@@ -4315,6 +4396,7 @@ async function refreshData() {
     await loadAllData();
     populateAccountSelect(select.value);
     rebuildCategoryFilter();
+    await rebuildAccountManagerFilter();
     render();
     flushPendingNotes();
   } catch (e) {
@@ -4331,8 +4413,11 @@ async function startApp() {
   if (!isEditor() && viewMode === 'order') viewMode = 'account';
 
   const roleBadge = document.getElementById('roleBadge');
-  roleBadge.textContent = isEditor() ? 'Editor' : 'Viewer';
-  roleBadge.className = 'role-badge ' + (isEditor() ? 'role-editor' : 'role-viewer');
+  const isManager = currentProfile && currentProfile.role === 'manager';
+  roleBadge.textContent = isManager ? 'Manager' : 'Rep';
+  roleBadge.className = 'role-badge ' + (isManager ? 'role-editor' : 'role-viewer');
+  accountManagerFilterEl.style.display = isManager ? '' : 'none';
+  if (!isManager) accountManagerFilterEl.value = '';
   content.innerHTML = '<div class="placeholder">Loading…</div>';
   try {
     await loadAllData();
@@ -4342,6 +4427,7 @@ async function startApp() {
   }
   populateAccountSelect('');
   rebuildCategoryFilter();
+  await rebuildAccountManagerFilter();
   if (location.hash === NEW_ACCOUNT_HASH && isEditor()) {
     openNewAccountRoute();
   } else {
@@ -4372,60 +4458,125 @@ function safeRemoveItem(key) {
 }
 
 const lockScreen = document.getElementById('lockScreen');
-const passcodeInput = document.getElementById('passcodeInput');
-const passcodeError = document.getElementById('passcodeError');
-const unlockBtn = document.getElementById('unlockBtn');
+const loginEmail = document.getElementById('loginEmail');
+const loginPassword = document.getElementById('loginPassword');
+const loginError = document.getElementById('loginError');
+const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 
-function tryUnlock() {
-  const val = passcodeInput.value;
-  let role = null;
-  if (val === EDITOR_PASSCODE) role = 'editor';
-  else if (val === VIEWER_PASSCODE) role = 'viewer';
+// The signed-in user's own role/display name, loaded fresh after every login —
+// null until a profiles row has been confirmed to exist for them.
+let currentProfile = null;
 
-  if (role) {
-    userRole = role;
-    safeSetItem(LOCK_KEY, 'yes');
-    safeSetItem(ROLE_KEY, role);
-    safeSetItem(UNLOCK_TIME_KEY, String(Date.now()));
-    lockScreen.style.display = 'none';
-    startApp();
-  } else {
-    passcodeError.textContent = 'Incorrect passcode.';
+async function loadCurrentProfile() {
+  const rows = await sb('profiles?select=id,email,display_name,role');
+  currentProfile = rows && rows[0] ? rows[0] : null;
+}
+
+async function tryLogin() {
+  loginError.textContent = '';
+  loginBtn.disabled = true;
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email: loginEmail.value.trim(),
+    password: loginPassword.value
+  });
+  loginBtn.disabled = false;
+  if (error) {
+    loginError.textContent = 'Incorrect email or password.';
+    return;
   }
+  await loadCurrentProfile();
+  if (!currentProfile) {
+    // Auth succeeded (a real Supabase Auth user exists) but no profiles row
+    // has been created for them yet — expected for a Dashboard-invited user
+    // before the one-time migration SQL has run. Don't let them into a
+    // broken half-signed-in state; sign back out and explain.
+    loginError.textContent = 'Your account exists but is not yet set up. Contact George.';
+    await supabaseClient.auth.signOut();
+    return;
+  }
+  lockScreen.style.display = 'none';
+  startApp();
 }
 
 function logOut() {
-  safeRemoveItem(LOCK_KEY);
-  safeRemoveItem(ROLE_KEY);
-  safeRemoveItem(UNLOCK_TIME_KEY);
+  supabaseClient.auth.signOut();
   location.reload();
 }
 
-unlockBtn.addEventListener('click', tryUnlock);
-passcodeInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') tryUnlock();
+loginBtn.addEventListener('click', tryLogin);
+loginPassword.addEventListener('keydown', e => {
+  if (e.key === 'Enter') tryLogin();
 });
 if (logoutBtn) logoutBtn.addEventListener('click', logOut);
 
-const unlockedAt = Number(safeGetItem(UNLOCK_TIME_KEY) || 0);
-// A session only counts as valid if it has a timestamp within the session window. Sessions
-// unlocked before this expiry check existed have no timestamp at all, so they no longer get a
-// free pass — they're treated the same as an expired session and re-prompt for the passcode.
-const sessionValid = safeGetItem(LOCK_KEY) === 'yes' && unlockedAt && (Date.now() - unlockedAt <= SESSION_DURATION_MS);
+const changePasswordBtn = document.getElementById('changePasswordBtn');
+changePasswordBtn.addEventListener('click', () => {
+  const opening = changePasswordPanel.style.display === 'none';
+  closeSecondaryPanels(); // also hides changePasswordPanel — harmless when we're about to reopen it below
+  if (opening) {
+    newPasswordInput.value = '';
+    confirmPasswordInput.value = '';
+    changePasswordError.textContent = '';
+    changePasswordError.classList.remove('success-msg');
+    changePasswordPanel.style.display = 'block';
+    newPasswordInput.focus();
+  }
+});
 
-if (sessionValid) {
-  const storedRole = safeGetItem(ROLE_KEY);
-  userRole = storedRole === 'editor' ? 'editor' : 'viewer';
-  lockScreen.style.display = 'none';
-  startApp();
-} else {
-  safeRemoveItem(LOCK_KEY);
-  safeRemoveItem(ROLE_KEY);
-  safeRemoveItem(UNLOCK_TIME_KEY);
+document.getElementById('cancelChangePasswordBtn').addEventListener('click', () => {
+  changePasswordPanel.style.display = 'none';
+});
+
+document.getElementById('saveNewPasswordBtn').addEventListener('click', async () => {
+  changePasswordError.textContent = '';
+  changePasswordError.classList.remove('success-msg');
+  const newPassword = newPasswordInput.value;
+  const confirmPassword = confirmPasswordInput.value;
+  if (newPassword.length < 6) {
+    changePasswordError.textContent = 'Password must be at least 6 characters.';
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    changePasswordError.textContent = 'Passwords do not match.';
+    return;
+  }
+  const saveBtn = document.getElementById('saveNewPasswordBtn');
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+  saveBtn.disabled = false;
+  saveBtn.textContent = 'Save New Password';
+  if (error) {
+    changePasswordError.textContent = 'Could not change password: ' + error.message;
+    return;
+  }
+  newPasswordInput.value = '';
+  confirmPasswordInput.value = '';
+  changePasswordError.textContent = 'Password updated.';
+  changePasswordError.classList.add('success-msg');
+});
+
+(async () => {
+  // supabase-js persists the session (localStorage) and auto-refreshes the
+  // access token, so a returning user stays logged in until they explicitly
+  // log out — no separate expiry timestamp to track ourselves anymore.
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (session) {
+    await loadCurrentProfile();
+    if (currentProfile) {
+      lockScreen.style.display = 'none';
+      startApp();
+      return;
+    }
+    // A stale/valid session for a user with no profiles row (e.g. removed
+    // from profiles, or invited but not yet migrated) — sign out cleanly
+    // rather than show a login form that will just fail the same way again.
+    await supabaseClient.auth.signOut();
+  }
   lockScreen.style.display = 'flex';
-  passcodeInput.focus();
-}
+  loginEmail.focus();
+})();
 </script>
 </body>
 </html>
