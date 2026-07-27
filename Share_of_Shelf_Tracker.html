@@ -38,6 +38,7 @@
   }
   .role-badge.role-editor { background: #fde3e6; color: var(--ours); }
   .role-badge.role-viewer { background: #e3f5ea; color: var(--heineken); }
+  .role-badge.role-owner { background: #e0e7ff; color: #4338ca; }
   .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 0.95rem; }
 
   .controls {
@@ -1445,14 +1446,15 @@ function updateCategoryCheckboxState() {
 
 // Manager-only filter — a Rep only ever sees their own accounts anyway (RLS-scoped), so
 // filtering by manager is meaningless for them; Managers use it to narrow the full account
-// list down to one rep's accounts. Options are every Rep in `profiles` (role=rep only —
-// Managers aren't account-manager assignees themselves, so they're excluded here) so a rep
-// shows up the moment their login exists, not only once they've added their first account.
-// Only a Manager's own session can actually read the full profiles list (RLS), which is fine
-// since this dropdown is hidden for Reps anyway.
+// list down to one rep's (or owner's) accounts. Options are every Rep or Owner in `profiles`
+// (plain Managers aren't account-manager assignees themselves, so they're excluded here) so
+// a rep shows up the moment their login exists, not only once they've added their first
+// account — Owner is included because an owner can still be assigned accounts (George
+// Naguib's 54 existing ones). Only a Manager/Owner session can actually read the full
+// profiles list (RLS), which is fine since this dropdown is hidden for Reps anyway.
 async function rebuildAccountManagerFilter() {
   const currentVal = accountManagerFilterEl.value;
-  const rows = await sb('profiles?select=display_name&role=eq.rep&order=display_name');
+  const rows = await sb('profiles?select=display_name&role=in.(rep,owner)&order=display_name');
   const names = rows.map(r => r.display_name);
   accountManagerFilterEl.innerHTML = '<option value="">Select Account Manager</option>' +
     names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
@@ -4413,9 +4415,10 @@ async function startApp() {
   if (!isEditor() && viewMode === 'order') viewMode = 'account';
 
   const roleBadge = document.getElementById('roleBadge');
-  const isManager = currentProfile && currentProfile.role === 'manager';
-  roleBadge.textContent = isManager ? 'Manager' : 'Rep';
-  roleBadge.className = 'role-badge ' + (isManager ? 'role-editor' : 'role-viewer');
+  const isOwner = currentProfile && currentProfile.role === 'owner';
+  const isManager = currentProfile && (currentProfile.role === 'manager' || isOwner);
+  roleBadge.textContent = isOwner ? 'Owner' : (isManager ? 'Manager' : 'Rep');
+  roleBadge.className = 'role-badge ' + (isOwner ? 'role-owner' : (isManager ? 'role-editor' : 'role-viewer'));
   accountManagerFilterEl.style.display = isManager ? '' : 'none';
   if (!isManager) accountManagerFilterEl.value = '';
   content.innerHTML = '<div class="placeholder">Loading…</div>';
