@@ -2457,18 +2457,59 @@ function renderOverview() {
 
 /* ---- Competitor Pricing (Manager/Owner only) ---- */
 
-const competitorPricingSort = { col: 'gap', dir: 'desc' };
-
-// Cross-account, category-level average price comparison — same underlying math as the
-// per-item price flag on an account page (computeCategoryAverages/PRICE_GAP_THRESHOLD),
-// just run once across every account left in scope by the Type/Region/Account Manager
-// filters instead of per-item within a single account.
-function computeCompetitorPricingRows() {
+// Same pool of SKUs (respecting the active Type/Region/Account Manager filters) feeds both
+// the category table and the brand-pair table below, so the two sections always agree on
+// which accounts are in scope.
+function competitorPricingItemPool() {
   const allItems = [];
   accountsForTypeFilter().forEach(name => {
     allItems.push(...(DATA.accounts[name] || []));
   });
-  const categoryAverages = computeCategoryAverages(allItems);
+  return allItems;
+}
+
+// Shared by both tables' sort-on-click headers — col/dir state plus a map of column name to
+// a function that pulls a comparable value (already null-safe/lowercased) out of a row.
+function sortPricingRows(rows, sortState, valueGetters) {
+  const { col, dir } = sortState;
+  const mul = dir === 'asc' ? 1 : -1;
+  const getter = valueGetters[col];
+  return [...rows].sort((a, b) => {
+    const va = getter(a), vb = getter(b);
+    if (va < vb) return -1 * mul;
+    if (va > vb) return 1 * mul;
+    return 0;
+  });
+}
+
+// Shared by both tables' rightmost column — same ▲/▼ + price-flag-high/low convention as the
+// per-item price flag on an account page, just at the row (category or brand-pair) level.
+function pricingGapCellHtml(diffPct, contextLabel) {
+  if (diffPct == null) return '—';
+  const gapText = `${diffPct > 0 ? '+' : ''}${diffPct.toFixed(0)}%`;
+  if (Math.abs(diffPct) < PRICE_GAP_THRESHOLD) return gapText;
+  const arrow = diffPct > 0 ? '▲' : '▼';
+  const cls = diffPct > 0 ? 'price-flag-high' : 'price-flag-low';
+  const title = `${OURS_LABEL} avg is ${Math.abs(diffPct).toFixed(0)}% ${diffPct > 0 ? 'above' : 'below'} ${HEINEKEN_LABEL} avg for ${contextLabel}`;
+  return `${gapText}<span class="price-flag ${cls}" title="${escapeHtml(title)}">${arrow} ${Math.abs(diffPct).toFixed(0)}%</span>`;
+}
+
+/* -- Category table -- */
+
+const competitorPricingSort = { col: 'gap', dir: 'desc' };
+
+const competitorPricingSortGetters = {
+  category: r => r.category.toLowerCase(),
+  ours: r => r.ours == null ? -1 : r.ours,
+  heineken: r => r.heineken == null ? -1 : r.heineken,
+  gap: r => r.diffPct == null ? -1 : Math.abs(r.diffPct)
+};
+
+// Cross-account, category-level average price comparison — same underlying math as the
+// per-item price flag on an account page (computeCategoryAverages/PRICE_GAP_THRESHOLD),
+// just run once across every account left in scope instead of per-item within one account.
+function computeCompetitorPricingRows() {
+  const categoryAverages = computeCategoryAverages(competitorPricingItemPool());
   const cats = orderCategories(new Set(Object.keys(categoryAverages)));
   return cats.map(cat => {
     const { Ours, Heineken } = categoryAverages[cat];
@@ -2479,45 +2520,77 @@ function computeCompetitorPricingRows() {
   });
 }
 
-function sortCompetitorPricingRows(rows) {
-  const { col, dir } = competitorPricingSort;
-  const mul = dir === 'asc' ? 1 : -1;
-  return [...rows].sort((a, b) => {
-    let va, vb;
-    if (col === 'category') {
-      va = a.category.toLowerCase(); vb = b.category.toLowerCase();
-    } else if (col === 'gap') {
-      va = a.diffPct == null ? -1 : Math.abs(a.diffPct);
-      vb = b.diffPct == null ? -1 : Math.abs(b.diffPct);
-    } else {
-      va = a[col] == null ? -1 : a[col];
-      vb = b[col] == null ? -1 : b[col];
-    }
-    if (va < vb) return -1 * mul;
-    if (va > vb) return 1 * mul;
-    return 0;
-  });
-}
-
 function competitorPricingRowHtml(row) {
   const oursText = row.ours != null ? fmtPrice(Math.round(row.ours)) : '—';
   const heinText = row.heineken != null ? fmtPrice(Math.round(row.heineken)) : '—';
-  let gapText = '—';
-  let flag = '';
-  if (row.diffPct != null) {
-    gapText = `${row.diffPct > 0 ? '+' : ''}${row.diffPct.toFixed(0)}%`;
-    if (Math.abs(row.diffPct) >= PRICE_GAP_THRESHOLD) {
-      const arrow = row.diffPct > 0 ? '▲' : '▼';
-      const cls = row.diffPct > 0 ? 'price-flag-high' : 'price-flag-low';
-      const title = `${OURS_LABEL} avg is ${Math.abs(row.diffPct).toFixed(0)}% ${row.diffPct > 0 ? 'above' : 'below'} ${HEINEKEN_LABEL} avg for ${row.category}`;
-      flag = `<span class="price-flag ${cls}" title="${escapeHtml(title)}">${arrow} ${Math.abs(row.diffPct).toFixed(0)}%</span>`;
-    }
-  }
   return `<tr>
     <td>${escapeHtml(row.category)}</td>
     <td class="num">${oursText}</td>
     <td class="num">${heinText}</td>
-    <td class="num">${gapText}${flag}</td>
+    <td class="num">${pricingGapCellHtml(row.diffPct, row.category)}</td>
+  </tr>`;
+}
+
+/* -- Brand match-ups table -- */
+
+// Fixed, hardcoded pairs (not user-editable). theirsCategory, when set, further restricts
+// the "theirs" match — Le Baron only compares against Chateau de Granville's Sparkling SKUs,
+// excluding ABC's Wine-category and NRB SKUs that share the same name. Aida Valmont and Cape
+// Bay each anchor two different `ours` rows on purpose — those two rows will show the exact
+// same ABC average, which is expected (same underlying "theirs" data, two comparisons).
+const BRAND_PAIRS = [
+  { ours: 'Shahrazade', theirs: 'Omar Khayyam' },
+  { ours: 'Le Baron', theirs: 'Chateau de Granville', theirsCategory: 'Sparkling' },
+  { ours: 'Lavita', theirs: 'Aida Valmont' },
+  { ours: 'Aria', theirs: 'Aida Valmont' },
+  { ours: 'Nala', theirs: 'Cape Bay' },
+  { ours: 'Chateau Byblos', theirs: 'Cape Bay' },
+  { ours: 'Beausoleil', theirs: 'CGM' },
+  { ours: 'Jardin du Nil', theirs: 'Castello di Trevi' }
+];
+
+function skuMatchesBrand(sku, brand) {
+  return sku.toLowerCase().includes(brand.toLowerCase());
+}
+
+function avgPrice(items) {
+  const priced = items.filter(i => i.price != null);
+  return priced.length ? priced.reduce((sum, i) => sum + i.price, 0) / priced.length : null;
+}
+
+function computeBrandPairRows() {
+  const allItems = competitorPricingItemPool();
+  return BRAND_PAIRS.map(pair => {
+    const ours = avgPrice(allItems.filter(i => i.side === 'Ours' && skuMatchesBrand(i.sku, pair.ours)));
+    const heineken = avgPrice(allItems.filter(i =>
+      i.side === 'Heineken' &&
+      skuMatchesBrand(i.sku, pair.theirs) &&
+      (!pair.theirsCategory || i.category === pair.theirsCategory)
+    ));
+    const diffPct = (ours != null && heineken != null && heineken !== 0)
+      ? ((ours - heineken) / heineken) * 100
+      : null;
+    return { label: `${pair.ours} vs ${pair.theirs}`, ours, heineken, diffPct };
+  });
+}
+
+const brandPairSort = { col: 'gap', dir: 'desc' };
+
+const brandPairSortGetters = {
+  pair: r => r.label.toLowerCase(),
+  ours: r => r.ours == null ? -1 : r.ours,
+  heineken: r => r.heineken == null ? -1 : r.heineken,
+  gap: r => r.diffPct == null ? -1 : Math.abs(r.diffPct)
+};
+
+function brandPairRowHtml(row) {
+  const oursText = row.ours != null ? fmtPrice(Math.round(row.ours)) : '—';
+  const heinText = row.heineken != null ? fmtPrice(Math.round(row.heineken)) : '—';
+  return `<tr>
+    <td>${escapeHtml(row.label)}</td>
+    <td class="num">${oursText}</td>
+    <td class="num">${heinText}</td>
+    <td class="num">${pricingGapCellHtml(row.diffPct, row.label)}</td>
   </tr>`;
 }
 
@@ -2525,8 +2598,12 @@ function renderCompetitorPricing() {
   addMenuPanel.style.display = 'none';
   accountDetailsPanel.style.display = 'none';
   editingAccount = null;
-  const rows = sortCompetitorPricingRows(computeCompetitorPricingRows());
-  const arrow = col => competitorPricingSort.col === col ? (competitorPricingSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+
+  const categoryRows = sortPricingRows(computeCompetitorPricingRows(), competitorPricingSort, competitorPricingSortGetters);
+  const categoryArrow = col => competitorPricingSort.col === col ? (competitorPricingSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const brandRows = sortPricingRows(computeBrandPairRows(), brandPairSort, brandPairSortGetters);
+  const brandArrow = col => brandPairSort.col === col ? (brandPairSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+
   const accountCount = accountsForTypeFilter().length;
   const filterParts = [];
   if (accountTypeFilterEl.value) filterParts.push(`Type: ${accountTypeFilterEl.value}`);
@@ -2538,35 +2615,55 @@ function renderCompetitorPricing() {
     <div class="card">
       <h2 class="section-title">Competitor Pricing — ${OURS_LABEL} vs ${HEINEKEN_LABEL}</h2>
       <div class="share-meta" style="margin-bottom:14px;">${escapeHtml(filterSummary)} (${accountCount} account${accountCount === 1 ? '' : 's'})</div>
-      ${rows.length === 0 ? '<div class="empty-msg">No priced SKUs found for this filter.</div>' : `
+      ${categoryRows.length === 0 ? '<div class="empty-msg">No priced SKUs found for this filter.</div>' : `
       <div style="overflow-x:auto;">
-        <table class="overview-table">
+        <table class="overview-table" id="categoryPricingTable">
           <thead>
             <tr>
-              <th class="sortable" data-sort="category">Category${arrow('category')}</th>
-              <th class="sortable num" data-sort="ours">${OURS_LABEL} Avg${arrow('ours')}</th>
-              <th class="sortable num" data-sort="heineken">${HEINEKEN_LABEL} Avg${arrow('heineken')}</th>
-              <th class="sortable num" data-sort="gap">Gap${arrow('gap')}</th>
+              <th class="sortable" data-sort="category">Category${categoryArrow('category')}</th>
+              <th class="sortable num" data-sort="ours">${OURS_LABEL} Avg${categoryArrow('ours')}</th>
+              <th class="sortable num" data-sort="heineken">${HEINEKEN_LABEL} Avg${categoryArrow('heineken')}</th>
+              <th class="sortable num" data-sort="gap">Gap${categoryArrow('gap')}</th>
             </tr>
           </thead>
-          <tbody>${rows.map(competitorPricingRowHtml).join('')}</tbody>
+          <tbody>${categoryRows.map(competitorPricingRowHtml).join('')}</tbody>
         </table>
       </div>`}
     </div>
+    <div class="card">
+      <h2 class="section-title">Brand Match-ups</h2>
+      <div style="overflow-x:auto;">
+        <table class="overview-table" id="brandPairTable">
+          <thead>
+            <tr>
+              <th class="sortable" data-sort="pair">Brand Pair${brandArrow('pair')}</th>
+              <th class="sortable num" data-sort="ours">${OURS_LABEL} Avg${brandArrow('ours')}</th>
+              <th class="sortable num" data-sort="heineken">${HEINEKEN_LABEL} Avg${brandArrow('heineken')}</th>
+              <th class="sortable num" data-sort="gap">Gap${brandArrow('gap')}</th>
+            </tr>
+          </thead>
+          <tbody>${brandRows.map(brandPairRowHtml).join('')}</tbody>
+        </table>
+      </div>
+    </div>
   `;
 
-  content.querySelectorAll('th.sortable').forEach(th => {
-    th.addEventListener('click', () => {
-      const col = th.dataset.sort;
-      if (competitorPricingSort.col === col) {
-        competitorPricingSort.dir = competitorPricingSort.dir === 'asc' ? 'desc' : 'asc';
-      } else {
-        competitorPricingSort.col = col;
-        competitorPricingSort.dir = col === 'category' ? 'asc' : 'desc';
-      }
-      render();
+  const wireSortableHeaders = (containerId, sortState, defaultAscCol) => {
+    document.querySelectorAll(`#${containerId} th.sortable`).forEach(th => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.sort;
+        if (sortState.col === col) {
+          sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          sortState.col = col;
+          sortState.dir = col === defaultAscCol ? 'asc' : 'desc';
+        }
+        render();
+      });
     });
-  });
+  };
+  wireSortableHeaders('categoryPricingTable', competitorPricingSort, 'category');
+  wireSortableHeaders('brandPairTable', brandPairSort, 'pair');
 }
 
 /* ---- Search SKU across accounts ---- */
