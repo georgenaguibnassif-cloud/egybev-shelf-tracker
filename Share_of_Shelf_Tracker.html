@@ -496,7 +496,6 @@
     <button id="overviewBtn" class="btn" type="button">Overview</button>
     <button id="searchSkuBtn" class="btn" type="button">Search SKU</button>
     <button id="createOrderBtn" class="btn" type="button">Create Order</button>
-    <button id="competitorPricingBtn" class="btn" type="button">Competitor Pricing</button>
     <button id="exportBtn" class="btn" type="button">Export</button>
     <button id="changePasswordBtn" class="btn" type="button">Change Password</button>
     <button id="logoutBtn" class="btn" type="button">Log out</button>
@@ -1284,7 +1283,6 @@ const accountFilterRowEl = document.getElementById('accountFilterRow');
 const overviewBtn = document.getElementById('overviewBtn');
 const searchSkuBtn = document.getElementById('searchSkuBtn');
 const createOrderBtn = document.getElementById('createOrderBtn');
-const competitorPricingBtn = document.getElementById('competitorPricingBtn');
 const exportBtn = document.getElementById('exportBtn');
 const addMenuBtn = document.getElementById('addMenuBtn');
 const addMenuPanel = document.getElementById('addMenuPanel');
@@ -1634,7 +1632,6 @@ function render() {
   if (viewMode === 'overview') { renderOverview(); return; }
   if (viewMode === 'search') { renderSearch(); return; }
   if (viewMode === 'order') { renderOrder(); return; }
-  if (viewMode === 'competitorPricing') { renderCompetitorPricing(); return; }
   // The Add New Account form isn't rendered into #content (it's its own panel above it) —
   // just make sure no other account's SKU view is left showing behind it.
   if (viewMode === 'newAccount') { content.innerHTML = ''; return; }
@@ -1939,6 +1936,7 @@ function renderAccountView() {
         <span><strong>Account Manager:</strong> ${escapeHtml(accountInfo.accountManager || '—')}</span>
       </div>
     </div>
+    ${accountBrandPairSectionHtml(items)}
     <div class="card">
       <h2 class="section-title">Contacts</h2>
       ${contactFormHtml}
@@ -2455,89 +2453,14 @@ function renderOverview() {
   });
 }
 
-/* ---- Competitor Pricing (Manager/Owner only) ---- */
-
-// Same pool of SKUs (respecting the active Type/Region/Account Manager filters) feeds both
-// the category table and the brand-pair table below, so the two sections always agree on
-// which accounts are in scope.
-function competitorPricingItemPool() {
-  const allItems = [];
-  accountsForTypeFilter().forEach(name => {
-    allItems.push(...(DATA.accounts[name] || []));
-  });
-  return allItems;
-}
-
-// Shared by both tables' sort-on-click headers — col/dir state plus a map of column name to
-// a function that pulls a comparable value (already null-safe/lowercased) out of a row.
-function sortPricingRows(rows, sortState, valueGetters) {
-  const { col, dir } = sortState;
-  const mul = dir === 'asc' ? 1 : -1;
-  const getter = valueGetters[col];
-  return [...rows].sort((a, b) => {
-    const va = getter(a), vb = getter(b);
-    if (va < vb) return -1 * mul;
-    if (va > vb) return 1 * mul;
-    return 0;
-  });
-}
-
-// Shared by both tables' rightmost column — same ▲/▼ + price-flag-high/low convention as the
-// per-item price flag on an account page, just at the row (category or brand-pair) level.
-function pricingGapCellHtml(diffPct, contextLabel) {
-  if (diffPct == null) return '—';
-  const gapText = `${diffPct > 0 ? '+' : ''}${diffPct.toFixed(0)}%`;
-  if (Math.abs(diffPct) < PRICE_GAP_THRESHOLD) return gapText;
-  const arrow = diffPct > 0 ? '▲' : '▼';
-  const cls = diffPct > 0 ? 'price-flag-high' : 'price-flag-low';
-  const title = `${OURS_LABEL} avg is ${Math.abs(diffPct).toFixed(0)}% ${diffPct > 0 ? 'above' : 'below'} ${HEINEKEN_LABEL} avg for ${contextLabel}`;
-  return `${gapText}<span class="price-flag ${cls}" title="${escapeHtml(title)}">${arrow} ${Math.abs(diffPct).toFixed(0)}%</span>`;
-}
-
-/* -- Category table -- */
-
-const competitorPricingSort = { col: 'gap', dir: 'desc' };
-
-const competitorPricingSortGetters = {
-  category: r => r.category.toLowerCase(),
-  ours: r => r.ours == null ? -1 : r.ours,
-  heineken: r => r.heineken == null ? -1 : r.heineken,
-  gap: r => r.diffPct == null ? -1 : Math.abs(r.diffPct)
-};
-
-// Cross-account, category-level average price comparison — same underlying math as the
-// per-item price flag on an account page (computeCategoryAverages/PRICE_GAP_THRESHOLD),
-// just run once across every account left in scope instead of per-item within one account.
-function computeCompetitorPricingRows() {
-  const categoryAverages = computeCategoryAverages(competitorPricingItemPool());
-  const cats = orderCategories(new Set(Object.keys(categoryAverages)));
-  return cats.map(cat => {
-    const { Ours, Heineken } = categoryAverages[cat];
-    const diffPct = (Ours != null && Heineken != null && Heineken !== 0)
-      ? ((Ours - Heineken) / Heineken) * 100
-      : null;
-    return { category: cat, ours: Ours, heineken: Heineken, diffPct };
-  });
-}
-
-function competitorPricingRowHtml(row) {
-  const oursText = row.ours != null ? fmtPrice(Math.round(row.ours)) : '—';
-  const heinText = row.heineken != null ? fmtPrice(Math.round(row.heineken)) : '—';
-  return `<tr>
-    <td>${escapeHtml(row.category)}</td>
-    <td class="num">${oursText}</td>
-    <td class="num">${heinText}</td>
-    <td class="num">${pricingGapCellHtml(row.diffPct, row.category)}</td>
-  </tr>`;
-}
-
-/* -- Brand match-ups table -- */
+/* ---- Brand Match-ups (per account) ---- */
 
 // Fixed, hardcoded pairs (not user-editable). theirsCategory, when set, further restricts
 // the "theirs" match — Le Baron only compares against Chateau de Granville's Sparkling SKUs,
 // excluding ABC's Wine-category and NRB SKUs that share the same name. Aida Valmont and Cape
 // Bay each anchor two different `ours` rows on purpose — those two rows will show the exact
-// same ABC average, which is expected (same underlying "theirs" data, two comparisons).
+// same ABC average when both are stocked, which is expected (same underlying "theirs" data,
+// two comparisons).
 const BRAND_PAIRS = [
   { ours: 'Shahrazade', theirs: 'Omar Khayyam' },
   { ours: 'Le Baron', theirs: 'Chateau de Granville', theirsCategory: 'Sparkling' },
@@ -2558,11 +2481,26 @@ function avgPrice(items) {
   return priced.length ? priced.reduce((sum, i) => sum + i.price, 0) / priced.length : null;
 }
 
-function computeBrandPairRows() {
-  const allItems = competitorPricingItemPool();
-  return BRAND_PAIRS.map(pair => {
-    const ours = avgPrice(allItems.filter(i => i.side === 'Ours' && skuMatchesBrand(i.sku, pair.ours)));
-    const heineken = avgPrice(allItems.filter(i =>
+// Same ▲/▼ + price-flag-high/low convention as the per-item price flag on an account page,
+// just at the brand-pair level instead of per-SKU.
+function pricingGapCellHtml(diffPct, contextLabel) {
+  if (diffPct == null) return '—';
+  const gapText = `${diffPct > 0 ? '+' : ''}${diffPct.toFixed(0)}%`;
+  if (Math.abs(diffPct) < PRICE_GAP_THRESHOLD) return gapText;
+  const arrow = diffPct > 0 ? '▲' : '▼';
+  const cls = diffPct > 0 ? 'price-flag-high' : 'price-flag-low';
+  const title = `${OURS_LABEL} avg is ${Math.abs(diffPct).toFixed(0)}% ${diffPct > 0 ? 'above' : 'below'} ${HEINEKEN_LABEL} avg for ${contextLabel}`;
+  return `${gapText}<span class="price-flag ${cls}" title="${escapeHtml(title)}">${arrow} ${Math.abs(diffPct).toFixed(0)}%</span>`;
+}
+
+// Computed from this one account's own items only (not pooled across accounts) — a plain
+// per-account comparison, same shape as the per-item price flag, just brand-vs-brand instead
+// of side-vs-category-average. Pairs where neither side has a match are dropped entirely
+// rather than showing a row of dashes, since most accounts only stock a handful of these 8.
+function accountBrandPairSectionHtml(items) {
+  const rows = BRAND_PAIRS.map(pair => {
+    const ours = avgPrice(items.filter(i => i.side === 'Ours' && skuMatchesBrand(i.sku, pair.ours)));
+    const heineken = avgPrice(items.filter(i =>
       i.side === 'Heineken' &&
       skuMatchesBrand(i.sku, pair.theirs) &&
       (!pair.theirsCategory || i.category === pair.theirsCategory)
@@ -2571,99 +2509,38 @@ function computeBrandPairRows() {
       ? ((ours - heineken) / heineken) * 100
       : null;
     return { label: `${pair.ours} vs ${pair.theirs}`, ours, heineken, diffPct };
-  });
-}
+  }).filter(row => row.ours != null || row.heineken != null);
 
-const brandPairSort = { col: 'gap', dir: 'desc' };
+  if (!rows.length) return '';
 
-const brandPairSortGetters = {
-  pair: r => r.label.toLowerCase(),
-  ours: r => r.ours == null ? -1 : r.ours,
-  heineken: r => r.heineken == null ? -1 : r.heineken,
-  gap: r => r.diffPct == null ? -1 : Math.abs(r.diffPct)
-};
+  const rowsHtml = rows.map(row => {
+    const oursText = row.ours != null ? fmtPrice(Math.round(row.ours)) : '—';
+    const heinText = row.heineken != null ? fmtPrice(Math.round(row.heineken)) : '—';
+    return `<tr>
+      <td>${escapeHtml(row.label)}</td>
+      <td class="num">${oursText}</td>
+      <td class="num">${heinText}</td>
+      <td class="num">${pricingGapCellHtml(row.diffPct, row.label)}</td>
+    </tr>`;
+  }).join('');
 
-function brandPairRowHtml(row) {
-  const oursText = row.ours != null ? fmtPrice(Math.round(row.ours)) : '—';
-  const heinText = row.heineken != null ? fmtPrice(Math.round(row.heineken)) : '—';
-  return `<tr>
-    <td>${escapeHtml(row.label)}</td>
-    <td class="num">${oursText}</td>
-    <td class="num">${heinText}</td>
-    <td class="num">${pricingGapCellHtml(row.diffPct, row.label)}</td>
-  </tr>`;
-}
-
-function renderCompetitorPricing() {
-  addMenuPanel.style.display = 'none';
-  accountDetailsPanel.style.display = 'none';
-  editingAccount = null;
-
-  const categoryRows = sortPricingRows(computeCompetitorPricingRows(), competitorPricingSort, competitorPricingSortGetters);
-  const categoryArrow = col => competitorPricingSort.col === col ? (competitorPricingSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-  const brandRows = sortPricingRows(computeBrandPairRows(), brandPairSort, brandPairSortGetters);
-  const brandArrow = col => brandPairSort.col === col ? (brandPairSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-
-  const accountCount = accountsForTypeFilter().length;
-  const filterParts = [];
-  if (accountTypeFilterEl.value) filterParts.push(`Type: ${accountTypeFilterEl.value}`);
-  if (accountRegionFilterEl.value) filterParts.push(`Region: ${accountRegionFilterEl.value}`);
-  if (accountManagerFilterEl.value) filterParts.push(`Account Manager: ${accountManagerFilterEl.value}`);
-  const filterSummary = filterParts.length ? `Filtered: ${filterParts.join(' · ')}` : 'All Accounts';
-
-  content.innerHTML = `
-    <div class="card">
-      <h2 class="section-title">Competitor Pricing — ${OURS_LABEL} vs ${HEINEKEN_LABEL}</h2>
-      <div class="share-meta" style="margin-bottom:14px;">${escapeHtml(filterSummary)} (${accountCount} account${accountCount === 1 ? '' : 's'})</div>
-      ${categoryRows.length === 0 ? '<div class="empty-msg">No priced SKUs found for this filter.</div>' : `
-      <div style="overflow-x:auto;">
-        <table class="overview-table" id="categoryPricingTable">
-          <thead>
-            <tr>
-              <th class="sortable" data-sort="category">Category${categoryArrow('category')}</th>
-              <th class="sortable num" data-sort="ours">${OURS_LABEL} Avg${categoryArrow('ours')}</th>
-              <th class="sortable num" data-sort="heineken">${HEINEKEN_LABEL} Avg${categoryArrow('heineken')}</th>
-              <th class="sortable num" data-sort="gap">Gap${categoryArrow('gap')}</th>
-            </tr>
-          </thead>
-          <tbody>${categoryRows.map(competitorPricingRowHtml).join('')}</tbody>
-        </table>
-      </div>`}
-    </div>
+  return `
     <div class="card">
       <h2 class="section-title">Brand Match-ups</h2>
       <div style="overflow-x:auto;">
-        <table class="overview-table" id="brandPairTable">
+        <table class="overview-table">
           <thead>
             <tr>
-              <th class="sortable" data-sort="pair">Brand Pair${brandArrow('pair')}</th>
-              <th class="sortable num" data-sort="ours">${OURS_LABEL} Avg${brandArrow('ours')}</th>
-              <th class="sortable num" data-sort="heineken">${HEINEKEN_LABEL} Avg${brandArrow('heineken')}</th>
-              <th class="sortable num" data-sort="gap">Gap${brandArrow('gap')}</th>
+              <th>Brand Pair</th>
+              <th class="num">${OURS_LABEL} Avg</th>
+              <th class="num">${HEINEKEN_LABEL} Avg</th>
+              <th class="num">Gap</th>
             </tr>
           </thead>
-          <tbody>${brandRows.map(brandPairRowHtml).join('')}</tbody>
+          <tbody>${rowsHtml}</tbody>
         </table>
       </div>
-    </div>
-  `;
-
-  const wireSortableHeaders = (containerId, sortState, defaultAscCol) => {
-    document.querySelectorAll(`#${containerId} th.sortable`).forEach(th => {
-      th.addEventListener('click', () => {
-        const col = th.dataset.sort;
-        if (sortState.col === col) {
-          sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
-        } else {
-          sortState.col = col;
-          sortState.dir = col === defaultAscCol ? 'asc' : 'desc';
-        }
-        render();
-      });
-    });
-  };
-  wireSortableHeaders('categoryPricingTable', competitorPricingSort, 'category');
-  wireSortableHeaders('brandPairTable', brandPairSort, 'pair');
+    </div>`;
 }
 
 /* ---- Search SKU across accounts ---- */
@@ -2956,13 +2833,6 @@ searchSkuBtn.addEventListener('click', () => {
 createOrderBtn.addEventListener('click', () => {
   closeSecondaryPanels();
   viewMode = viewMode === 'order' ? 'account' : 'order';
-  updateModeUI();
-  render();
-});
-
-competitorPricingBtn.addEventListener('click', () => {
-  closeSecondaryPanels();
-  viewMode = viewMode === 'competitorPricing' ? 'account' : 'competitorPricing';
   updateModeUI();
   render();
 });
@@ -4649,8 +4519,6 @@ async function startApp() {
   roleBadge.className = 'role-badge ' + (isOwner ? 'role-owner' : (isManager ? 'role-editor' : 'role-viewer'));
   accountManagerFilterEl.style.display = isManager ? '' : 'none';
   if (!isManager) accountManagerFilterEl.value = '';
-  competitorPricingBtn.style.display = isManager ? '' : 'none';
-  if (!isManager && viewMode === 'competitorPricing') viewMode = 'account';
   content.innerHTML = '<div class="placeholder">Loading…</div>';
   try {
     await loadAllData();
