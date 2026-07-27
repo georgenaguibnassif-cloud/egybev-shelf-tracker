@@ -2482,34 +2482,50 @@ function avgPrice(items) {
 }
 
 // Same ▲/▼ + price-flag-high/low convention as the per-item price flag on an account page,
-// just at the brand-pair level instead of per-SKU.
+// just at the brand-pair level instead of per-SKU. Wording says "price", not "avg" — see
+// accountBrandPairSectionHtml for why.
 function pricingGapCellHtml(diffPct, contextLabel) {
   if (diffPct == null) return '—';
   const gapText = `${diffPct > 0 ? '+' : ''}${diffPct.toFixed(0)}%`;
   if (Math.abs(diffPct) < PRICE_GAP_THRESHOLD) return gapText;
   const arrow = diffPct > 0 ? '▲' : '▼';
   const cls = diffPct > 0 ? 'price-flag-high' : 'price-flag-low';
-  const title = `${OURS_LABEL} avg is ${Math.abs(diffPct).toFixed(0)}% ${diffPct > 0 ? 'above' : 'below'} ${HEINEKEN_LABEL} avg for ${contextLabel}`;
+  const title = `${OURS_LABEL} price is ${Math.abs(diffPct).toFixed(0)}% ${diffPct > 0 ? 'above' : 'below'} ${HEINEKEN_LABEL} price for ${contextLabel}`;
   return `${gapText}<span class="price-flag ${cls}" title="${escapeHtml(title)}">${arrow} ${Math.abs(diffPct).toFixed(0)}%</span>`;
 }
 
 // Computed from this one account's own items only (not pooled across accounts) — a plain
 // per-account comparison, same shape as the per-item price flag, just brand-vs-brand instead
-// of side-vs-category-average. Pairs where neither side has a match are dropped entirely
-// rather than showing a row of dashes, since most accounts only stock a handful of these 8.
+// of side-vs-category-average. Wine and Sparkling are always split into separate rows rather
+// than blended (a brand sold as both a still and a sparkling wine gets two independent rows)
+// — Le Baron's theirsCategory restriction still applies first, so its Wine/NRB Chateau de
+// Granville SKUs never enter the match at all, same as before. With splitting, a given
+// brand+category combination is usually exactly one SKU, so the columns are the actual price,
+// not an average across several — averaging (avgPrice) still runs underneath in case an
+// account genuinely stocks more than one SKU for the same brand+category, but "Avg" is no
+// longer in the header since that's the exception, not the norm, at this granularity.
 function accountBrandPairSectionHtml(items) {
-  const rows = BRAND_PAIRS.map(pair => {
-    const ours = avgPrice(items.filter(i => i.side === 'Ours' && skuMatchesBrand(i.sku, pair.ours)));
-    const heineken = avgPrice(items.filter(i =>
+  const rows = [];
+  BRAND_PAIRS.forEach(pair => {
+    const oursMatches = items.filter(i => i.side === 'Ours' && skuMatchesBrand(i.sku, pair.ours));
+    const theirsMatches = items.filter(i =>
       i.side === 'Heineken' &&
       skuMatchesBrand(i.sku, pair.theirs) &&
       (!pair.theirsCategory || i.category === pair.theirsCategory)
-    ));
-    const diffPct = (ours != null && heineken != null && heineken !== 0)
-      ? ((ours - heineken) / heineken) * 100
-      : null;
-    return { label: `${pair.ours} vs ${pair.theirs}`, ours, heineken, diffPct };
-  }).filter(row => row.ours != null || row.heineken != null);
+    );
+    const categoriesPresent = orderCategories(new Set([
+      ...oursMatches.map(i => i.category),
+      ...theirsMatches.map(i => i.category)
+    ]));
+    categoriesPresent.forEach(cat => {
+      const ours = avgPrice(oursMatches.filter(i => i.category === cat));
+      const heineken = avgPrice(theirsMatches.filter(i => i.category === cat));
+      const diffPct = (ours != null && heineken != null && heineken !== 0)
+        ? ((ours - heineken) / heineken) * 100
+        : null;
+      rows.push({ label: `${pair.ours} vs ${pair.theirs} (${cat})`, ours, heineken, diffPct });
+    });
+  });
 
   if (!rows.length) return '';
 
@@ -2532,8 +2548,8 @@ function accountBrandPairSectionHtml(items) {
           <thead>
             <tr>
               <th>Brand Pair</th>
-              <th class="num">${OURS_LABEL} Avg</th>
-              <th class="num">${HEINEKEN_LABEL} Avg</th>
+              <th class="num">${OURS_LABEL}</th>
+              <th class="num">${HEINEKEN_LABEL}</th>
               <th class="num">Gap</th>
             </tr>
           </thead>
