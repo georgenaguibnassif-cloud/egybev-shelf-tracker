@@ -2496,16 +2496,16 @@ function pricingGapCellHtml(diffPct, contextLabel) {
 
 // Computed from this one account's own items only (not pooled across accounts) — a plain
 // per-account comparison, same shape as the per-item price flag, just brand-vs-brand instead
-// of side-vs-category-average. Wine and Sparkling are always split into separate rows rather
-// than blended (a brand sold as both a still and a sparkling wine gets two independent rows)
-// — Le Baron's theirsCategory restriction still applies first, so its Wine/NRB Chateau de
-// Granville SKUs never enter the match at all, same as before. With splitting, a given
+// of side-vs-category-average. Wine and Sparkling are always kept as fully separate sections
+// (a brand sold as both a still and a sparkling wine gets a row under each heading, never
+// blended into one number) — Le Baron's theirsCategory restriction still applies first, so
+// its Wine/NRB Chateau de Granville SKUs never enter either section. With splitting, a given
 // brand+category combination is usually exactly one SKU, so the columns are the actual price,
 // not an average across several — averaging (avgPrice) still runs underneath in case an
 // account genuinely stocks more than one SKU for the same brand+category, but "Avg" is no
 // longer in the header since that's the exception, not the norm, at this granularity.
 function accountBrandPairSectionHtml(items) {
-  const rows = [];
+  const rowsByCategory = {};
   BRAND_PAIRS.forEach(pair => {
     const oursMatches = items.filter(i => i.side === 'Ours' && skuMatchesBrand(i.sku, pair.ours));
     const theirsMatches = items.filter(i =>
@@ -2523,26 +2523,27 @@ function accountBrandPairSectionHtml(items) {
       const diffPct = (ours != null && heineken != null && heineken !== 0)
         ? ((ours - heineken) / heineken) * 100
         : null;
-      rows.push({ label: `${pair.ours} vs ${pair.theirs} (${cat})`, ours, heineken, diffPct });
+      if (!rowsByCategory[cat]) rowsByCategory[cat] = [];
+      rowsByCategory[cat].push({ label: `${pair.ours} vs ${pair.theirs}`, ours, heineken, diffPct });
     });
   });
 
-  if (!rows.length) return '';
+  const categories = orderCategories(new Set(Object.keys(rowsByCategory)));
+  if (!categories.length) return '';
 
-  const rowsHtml = rows.map(row => {
-    const oursText = row.ours != null ? fmtPrice(Math.round(row.ours)) : '—';
-    const heinText = row.heineken != null ? fmtPrice(Math.round(row.heineken)) : '—';
-    return `<tr>
-      <td>${escapeHtml(row.label)}</td>
-      <td class="num">${oursText}</td>
-      <td class="num">${heinText}</td>
-      <td class="num">${pricingGapCellHtml(row.diffPct, row.label)}</td>
-    </tr>`;
-  }).join('');
-
-  return `
-    <div class="card">
-      <h2 class="section-title">Brand Match-ups</h2>
+  const sectionsHtml = categories.map(cat => {
+    const rowsHtml = rowsByCategory[cat].map(row => {
+      const oursText = row.ours != null ? fmtPrice(Math.round(row.ours)) : '—';
+      const heinText = row.heineken != null ? fmtPrice(Math.round(row.heineken)) : '—';
+      return `<tr>
+        <td>${escapeHtml(row.label)}</td>
+        <td class="num">${oursText}</td>
+        <td class="num">${heinText}</td>
+        <td class="num">${pricingGapCellHtml(row.diffPct, row.label)}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <div class="order-cat-heading">${escapeHtml(cat)}</div>
       <div style="overflow-x:auto;">
         <table class="overview-table">
           <thead>
@@ -2555,7 +2556,13 @@ function accountBrandPairSectionHtml(items) {
           </thead>
           <tbody>${rowsHtml}</tbody>
         </table>
-      </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <h2 class="section-title">Brand Match-ups</h2>
+      ${sectionsHtml}
     </div>`;
 }
 
