@@ -1454,7 +1454,14 @@ function updateCategoryCheckboxState() {
 // profiles list (RLS), which is fine since this dropdown is hidden for Reps anyway.
 async function rebuildAccountManagerFilter() {
   const currentVal = accountManagerFilterEl.value;
-  const rows = await sb('profiles?select=display_name&role=in.(rep,owner)&order=display_name');
+  // If the viewer has a hidden_rep_id set, drop that person from the picker entirely —
+  // their accounts always come back empty for this viewer anyway (RLS), so leaving their
+  // name in the list would just be a tell that someone's being deliberately excluded.
+  let path = 'profiles?select=display_name&role=in.(rep,owner)&order=display_name';
+  if (currentProfile && currentProfile.hidden_rep_id) {
+    path += `&id=neq.${currentProfile.hidden_rep_id}`;
+  }
+  const rows = await sb(path);
   const names = rows.map(r => r.display_name);
   accountManagerFilterEl.innerHTML = '<option value="">Select Account Manager</option>' +
     names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
@@ -4477,7 +4484,7 @@ async function loadCurrentProfile() {
   // rows[0] would be an arbitrary row, not necessarily their own.
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) { currentProfile = null; return; }
-  const rows = await sb(`profiles?select=id,email,display_name,role&id=eq.${session.user.id}`);
+  const rows = await sb(`profiles?select=id,email,display_name,role,hidden_rep_id&id=eq.${session.user.id}`);
   currentProfile = rows && rows[0] ? rows[0] : null;
 }
 
