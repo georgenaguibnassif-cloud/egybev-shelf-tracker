@@ -4472,7 +4472,12 @@ const logoutBtn = document.getElementById('logoutBtn');
 let currentProfile = null;
 
 async function loadCurrentProfile() {
-  const rows = await sb('profiles?select=id,email,display_name,role');
+  // Must filter to the signed-in user's own id: Managers/Owner can read every
+  // profiles row (RLS), so an unfiltered fetch returns the whole team and
+  // rows[0] would be an arbitrary row, not necessarily their own.
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { currentProfile = null; return; }
+  const rows = await sb(`profiles?select=id,email,display_name,role&id=eq.${session.user.id}`);
   currentProfile = rows && rows[0] ? rows[0] : null;
 }
 
