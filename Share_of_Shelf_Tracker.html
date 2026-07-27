@@ -2472,6 +2472,14 @@ const BRAND_PAIRS = [
   { ours: 'Jardin du Nil', theirs: 'Castello di Trevi' }
 ];
 
+// Fixed display order within each section (by pair.ours name), not derived from data or
+// BRAND_PAIRS declaration order. Any category without an explicit list here (or any pair
+// somehow missing from its category's list) just falls back to BRAND_PAIRS order at the end.
+const BRAND_PAIR_ORDER = {
+  Wine: ['Shahrazade', 'Beausoleil', 'Jardin du Nil', 'Chateau Byblos', 'Nala'],
+  Sparkling: ['Lavita', 'Aria', 'Le Baron']
+};
+
 function skuMatchesBrand(sku, brand) {
   return sku.toLowerCase().includes(brand.toLowerCase());
 }
@@ -2524,7 +2532,7 @@ function accountBrandPairSectionHtml(items) {
         ? ((ours - heineken) / heineken) * 100
         : null;
       if (!rowsByCategory[cat]) rowsByCategory[cat] = [];
-      rowsByCategory[cat].push({ label: `${pair.ours} vs ${pair.theirs}`, ours, heineken, diffPct });
+      rowsByCategory[cat].push({ oursBrand: pair.ours, label: `${pair.ours} vs ${pair.theirs}`, ours, heineken, diffPct });
     });
   });
 
@@ -2532,7 +2540,13 @@ function accountBrandPairSectionHtml(items) {
   if (!categories.length) return '';
 
   const sectionsHtml = categories.map(cat => {
-    const rowsHtml = rowsByCategory[cat].map(row => {
+    const orderList = BRAND_PAIR_ORDER[cat] || [];
+    const orderedRows = [...rowsByCategory[cat]].sort((a, b) => {
+      const ia = orderList.indexOf(a.oursBrand);
+      const ib = orderList.indexOf(b.oursBrand);
+      return (ia === -1 ? orderList.length : ia) - (ib === -1 ? orderList.length : ib);
+    });
+    const rowsHtml = orderedRows.map(row => {
       const oursText = row.ours != null ? fmtPrice(Math.round(row.ours)) : '—';
       const heinText = row.heineken != null ? fmtPrice(Math.round(row.heineken)) : '—';
       return `<tr>
