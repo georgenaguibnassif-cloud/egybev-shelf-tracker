@@ -437,6 +437,24 @@
   }
   #lockScreen input[type="email"], #lockScreen input[type="password"] { width: 100%; margin-bottom: 12px; }
   #lockScreen .btn { width: 100%; }
+
+  /* Custom in-page confirm/alert — some browsers silently start blocking native
+     window.confirm()/alert() after a page has shown several already in one session
+     (auto-returning false, no dialog at all), which makes a real button press look
+     like it does nothing. This can never be silently suppressed like that. */
+  #confirmModalOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 20px;
+  }
+  #confirmModalOverlay .card { max-width: 380px; width: 100%; }
+  #confirmModalMessage { white-space: pre-line; margin-bottom: 16px; }
+  #confirmModalActions { display: flex; gap: 10px; justify-content: flex-end; }
 </style>
 </head>
 <body>
@@ -447,6 +465,15 @@
     <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
     <button id="loginBtn" class="btn btn-primary" type="button">Sign in</button>
     <div class="error-msg" id="loginError"></div>
+  </div>
+</div>
+<div id="confirmModalOverlay">
+  <div class="card">
+    <div id="confirmModalMessage"></div>
+    <div id="confirmModalActions">
+      <button id="confirmModalCancelBtn" class="btn" type="button">Cancel</button>
+      <button id="confirmModalOkBtn" class="btn btn-primary" type="button">OK</button>
+    </div>
   </div>
 </div>
 <div class="wrap">
@@ -1276,6 +1303,37 @@ const skuFilterHeinEl = document.getElementById('skuFilterHeineken');
 const skuFilterEgyBevLabel = document.getElementById('skuFilterEgyBevLabel');
 const skuFilterHeinLabel = document.getElementById('skuFilterHeinLabel');
 const skuFilterClearBtn = document.getElementById('skuFilterClearBtn');
+
+const confirmModalOverlay = document.getElementById('confirmModalOverlay');
+const confirmModalMessage = document.getElementById('confirmModalMessage');
+const confirmModalCancelBtn = document.getElementById('confirmModalCancelBtn');
+const confirmModalOkBtn = document.getElementById('confirmModalOkBtn');
+
+// Replaces window.confirm()/alert() everywhere in this app. Native dialogs get silently
+// blocked by the browser (auto-return false/undefined, no popup at all) after a page has
+// shown several already in one session — a real click on e.g. "Delete Account" would then
+// look like it does nothing, with no error and no visible cause. This overlay can't be
+// silently suppressed that way.
+function showModal(message, showCancel) {
+  return new Promise(resolve => {
+    confirmModalMessage.textContent = message;
+    confirmModalCancelBtn.style.display = showCancel ? '' : 'none';
+    confirmModalOverlay.style.display = 'flex';
+    const cleanup = (result) => {
+      confirmModalOverlay.style.display = 'none';
+      confirmModalOkBtn.removeEventListener('click', onOk);
+      confirmModalCancelBtn.removeEventListener('click', onCancel);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    confirmModalOkBtn.addEventListener('click', onOk);
+    confirmModalCancelBtn.addEventListener('click', onCancel);
+  });
+}
+function showConfirm(message) { return showModal(message, true); }
+function showAlert(message) { return showModal(message, false); }
+
 const content = document.getElementById('content');
 const categoryFilterEl = document.getElementById('categoryFilter');
 const byGlassFilterEl = document.getElementById('byGlassFilter');
@@ -1845,7 +1903,7 @@ function renderAccountView() {
   const sharePct = sharePctNum.toFixed(1);
 
   const deleteBtn = (isEditor() && customAccounts.has(account))
-    ? `<button class="btn-danger" id="deleteMenuBtn" type="button">Delete this menu</button>`
+    ? `<button class="btn-danger" id="deleteMenuBtn" type="button">Delete Account</button>`
     : '';
 
   const revertBtn = (isEditor() && editedAccounts.has(account))
@@ -1972,7 +2030,7 @@ function renderAccountView() {
   const delBtn = document.getElementById('deleteMenuBtn');
   if (delBtn) {
     delBtn.addEventListener('click', async () => {
-      if (!confirm(`Delete "${account}"? This can't be undone.`)) return;
+      if (!(await showConfirm(`Delete "${account}"? This can't be undone.`))) return;
       delBtn.disabled = true;
       try {
         await sb(`skus?account_name=eq.${encodeURIComponent(account)}`, { method: 'DELETE' });
@@ -1980,7 +2038,7 @@ function renderAccountView() {
         await sb(`contacts?account_name=eq.${encodeURIComponent(account)}`, { method: 'DELETE' });
         await sb(`accounts_meta?account_name=eq.${encodeURIComponent(account)}`, { method: 'DELETE' });
       } catch (e) {
-        alert('Could not delete: ' + e.message);
+        await showAlert('Could not delete: ' + e.message);
         delBtn.disabled = false;
         return;
       }
@@ -1997,7 +2055,7 @@ function renderAccountView() {
   const revBtn = document.getElementById('revertMenuBtn');
   if (revBtn) {
     revBtn.addEventListener('click', async () => {
-      if (!confirm(`Revert "${account}" to its original menu? Your edits will be lost.`)) return;
+      if (!(await showConfirm(`Revert "${account}" to its original menu? Your edits will be lost.`))) return;
       revBtn.disabled = true;
       const originalItems = ORIGINAL_ACCOUNTS_SNAPSHOT[account];
       try {
@@ -2008,7 +2066,7 @@ function renderAccountView() {
           body: JSON.stringify({ is_edited: false })
         });
       } catch (e) {
-        alert('Could not revert: ' + e.message);
+        await showAlert('Could not revert: ' + e.message);
         revBtn.disabled = false;
         return;
       }
@@ -2091,7 +2149,7 @@ function renderAccountView() {
         render();
         return;
       }
-      alert('Could not save note: ' + err.message);
+      await showAlert('Could not save note: ' + err.message);
       e.target.disabled = false;
       return;
     }
@@ -2104,7 +2162,7 @@ function renderAccountView() {
       try {
         await deleteNote(account, btn.dataset.id);
       } catch (e) {
-        alert('Could not delete note: ' + e.message);
+        await showAlert('Could not delete note: ' + e.message);
         btn.disabled = false;
         return;
       }
@@ -2164,7 +2222,7 @@ function renderAccountView() {
     try {
       await addContact(account, nameVal, roleVal, phoneVal);
     } catch (err) {
-      alert('Could not save contact: ' + err.message);
+      await showAlert('Could not save contact: ' + err.message);
       e.target.disabled = false;
       return;
     }
@@ -2177,7 +2235,7 @@ function renderAccountView() {
       try {
         await deleteContact(account, btn.dataset.id);
       } catch (e) {
-        alert('Could not delete contact: ' + e.message);
+        await showAlert('Could not delete contact: ' + e.message);
         btn.disabled = false;
         return;
       }
