@@ -1502,24 +1502,16 @@ function updateCategoryCheckboxState() {
   categoryFilterEl.style.opacity = disabled ? '0.5' : '';
 }
 
-// Manager-only filter — a Rep only ever sees their own accounts anyway (RLS-scoped), so
-// filtering by manager is meaningless for them; Managers use it to narrow the full account
-// list down to one rep's (or owner's) accounts. Options are every Rep or Owner in `profiles`
+// Everyone has equal access now (RLS no longer scopes by owner_id), so this filter is just
+// for narrowing the full account list down to one rep's (or owner's) accounts — meaningful
+// for anyone now, not just Managers/Owner. Options are every Rep or Owner in `profiles`
 // (plain Managers aren't account-manager assignees themselves, so they're excluded here) so
 // a rep shows up the moment their login exists, not only once they've added their first
 // account — Owner is included because an owner can still be assigned accounts (George
-// Naguib's 54 existing ones). Only a Manager/Owner session can actually read the full
-// profiles list (RLS), which is fine since this dropdown is hidden for Reps anyway.
+// Naguib's 54 existing ones).
 async function rebuildAccountManagerFilter() {
   const currentVal = accountManagerFilterEl.value;
-  // If the viewer has a hidden_rep_id set, drop that person from the picker entirely —
-  // their accounts always come back empty for this viewer anyway (RLS), so leaving their
-  // name in the list would just be a tell that someone's being deliberately excluded.
-  let path = 'profiles?select=display_name&role=in.(rep,owner)&order=display_name';
-  if (currentProfile && currentProfile.hidden_rep_id) {
-    path += `&id=neq.${currentProfile.hidden_rep_id}`;
-  }
-  const rows = await sb(path);
+  const rows = await sb('profiles?select=display_name&role=in.(rep,owner)&order=display_name');
   const names = rows.map(r => r.display_name);
   accountManagerFilterEl.innerHTML = '<option value="">Select Account Manager</option>' +
     names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
@@ -4612,8 +4604,10 @@ async function startApp() {
   const isManager = currentProfile && (currentProfile.role === 'manager' || isOwner);
   roleBadge.textContent = isOwner ? 'Owner' : (isManager ? 'Manager' : 'Rep');
   roleBadge.className = 'role-badge ' + (isOwner ? 'role-owner' : (isManager ? 'role-editor' : 'role-viewer'));
-  accountManagerFilterEl.style.display = isManager ? '' : 'none';
-  if (!isManager) accountManagerFilterEl.value = '';
+  // Everyone has equal admin authority now (RLS is no longer scoped by role) -- the badge
+  // above still shows each person's historical Rep/Manager/Owner label, but every admin
+  // capability, including this filter, is available to everyone regardless of it.
+  accountManagerFilterEl.style.display = '';
   content.innerHTML = '<div class="placeholder">Loading…</div>';
   try {
     await loadAllData();
