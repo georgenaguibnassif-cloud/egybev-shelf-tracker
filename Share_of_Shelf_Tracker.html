@@ -522,6 +522,7 @@
     <button id="addMenuBtn" class="btn" type="button">+ Add New Account</button>
     <button id="overviewBtn" class="btn" type="button">Overview</button>
     <button id="searchSkuBtn" class="btn" type="button">Search SKU</button>
+    <button id="marketReadingBtn" class="btn" type="button">Market Reading</button>
     <button id="createOrderBtn" class="btn" type="button">Create Order</button>
     <button id="exportBtn" class="btn" type="button">Export</button>
     <button id="changePasswordBtn" class="btn" type="button">Change Password</button>
@@ -1340,6 +1341,7 @@ const byGlassFilterEl = document.getElementById('byGlassFilter');
 const accountFilterRowEl = document.getElementById('accountFilterRow');
 const overviewBtn = document.getElementById('overviewBtn');
 const searchSkuBtn = document.getElementById('searchSkuBtn');
+const marketReadingBtn = document.getElementById('marketReadingBtn');
 const createOrderBtn = document.getElementById('createOrderBtn');
 const exportBtn = document.getElementById('exportBtn');
 const addMenuBtn = document.getElementById('addMenuBtn');
@@ -1681,6 +1683,7 @@ function render() {
   content.style.display = '';
   if (viewMode === 'overview') { renderOverview(); return; }
   if (viewMode === 'search') { renderSearch(); return; }
+  if (viewMode === 'marketReading') { renderMarketReading(); return; }
   if (viewMode === 'order') { renderOrder(); return; }
   // The Add New Account form isn't rendered into #content (it's its own panel above it) —
   // just make sure no other account's SKU view is left showing behind it.
@@ -2630,6 +2633,276 @@ function accountBrandPairSectionHtml(items) {
     </div>`;
 }
 
+/* ---- Market Reading (where does an ABC brand sell, and what do we have there) ---- */
+
+// Raw text in the search box. Resolved to a brand + category pair on every render rather
+// than stored pre-split, so typing freehand behaves the same as picking from the datalist.
+let marketReadingQuery = '';
+const marketReadingSort = { col: 'brand', dir: 'desc' };
+// Exactly what the table last rendered, so the Excel export can't drift from the screen.
+let marketReadingLastRows = [];
+let marketReadingLastHeaders = [];
+
+// Trailing words that denote a variant of the same brand rather than a different brand, so
+// "Aida Valmont White" and "Aida Valmont Rose" both roll up to "Aida Valmont" in the picker.
+// This heuristic only BUILDS the suggestion list — real matching goes through
+// skuMatchesBrand() on whatever text is in the box, so a brand this mangles is still
+// findable by typing it directly.
+const BRAND_VARIANT_SUFFIX = /\s+(white|red|rosé|rose|brut|secco|dolce|signature|semi[\s-]*sweet|draught|draft|bottle|pint|glass|chardonnay|merlot|sparkling|gold|local|non[\s-]*alcohol\w*|\d+\s*(ml|cl|l))\b.*$/i;
+
+function brandRootOf(sku) {
+  return sku.replace(BRAND_VARIANT_SUFFIX, '').trim() || sku.trim();
+}
+
+// Distinct "Brand (Category)" pairs across every ABC SKU in scope of the active filters.
+// Category is part of the option, not inferred later, because one brand name can span two
+// categories — "Chateau de Granville" exists as both a Sparkling and a Wine listing — and
+// the "what do we have here" column is category-specific, so picking the wrong one would
+// silently compare against the wrong side of our range.
+function marketReadingBrandOptions() {
+  const seen = new Set();
+  accountsForTypeFilter().forEach(name => {
+    (DATA.accounts[name] || []).forEach(i => {
+      if (i.side === 'Heineken') seen.add(`${brandRootOf(i.sku)}|${i.category}`);
+    });
+  });
+  return [...seen].map(k => {
+    const [brand, category] = k.split('|');
+    return { brand, category, label: `${brand} (${category})` };
+  }).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// Accepts either the exact "Brand (Category)" label from the picker or a bare brand typed
+// freehand. A bare name matching exactly one category resolves silently; one spanning
+// several is reported back for disambiguation rather than quietly picking a category.
+function resolveMarketReadingInput(raw) {
+  const text = (raw || '').trim();
+  if (!text) return { status: 'empty' };
+  const paren = text.match(/^(.*)\s+\(([^()]+)\)\s*$/);
+  if (paren) return { status: 'ok', brand: paren[1].trim(), category: paren[2].trim() };
+  const cats = new Set();
+  accountsForTypeFilter().forEach(name => {
+    (DATA.accounts[name] || []).forEach(i => {
+      if (i.side === 'Heineken' && skuMatchesBrand(i.sku, text)) cats.add(i.category);
+    });
+  });
+  if (cats.size === 0) return { status: 'nomatch', brand: text };
+  if (cats.size === 1) return { status: 'ok', brand: text, category: [...cats][0] };
+  return { status: 'ambiguous', brand: text, categories: orderCategories(cats) };
+}
+
+function marketReadingPriceLabel(i) {
+  if (i.price != null) return `${i.sku} ${fmtPrice(i.price)}`;
+  // A glass-only listing still tells us they stock it, so show that rather than a bare dash.
+  if (i.byGlass && i.glassPrice != null) return `${i.sku} ${fmtPrice(i.glassPrice)} (glass)`;
+  return `${i.sku} (no price set)`;
+}
+
+// Every account in filter scope gets a row, including ones carrying neither side — an empty
+// row is the actual finding ("they don't stock it and neither do we"), so dropping those
+// would misrepresent the footprint.
+function computeMarketReadingRows(brand, category) {
+  const minPrice = arr => {
+    const p = arr.map(i => i.price).filter(v => v != null);
+    return p.length ? Math.min(...p) : null;
+  };
+  return accountsForTypeFilter().map(name => {
+    const items = DATA.accounts[name] || [];
+    const info = ACCOUNT_INFO[name] || {};
+    const theirs = items.filter(i => i.side === 'Heineken' && i.category === category && skuMatchesBrand(i.sku, brand));
+    const ours = items.filter(i => i.side === 'Ours' && i.category === category);
+    return {
+      account: name,
+      type: info.type || '—',
+      region: info.region || '—',
+      theirsText: theirs.length ? theirs.map(marketReadingPriceLabel).join(' / ') : '—',
+      oursText: ours.length ? ours.map(marketReadingPriceLabel).join(' / ') : '—',
+      hasTheirs: theirs.length > 0,
+      hasOurs: ours.length > 0,
+      theirsMin: minPrice(theirs),
+      oursMin: minPrice(ours)
+    };
+  });
+}
+
+const marketReadingSortGetters = {
+  account: r => r.account.toLowerCase(),
+  type: r => String(r.type).toLowerCase(),
+  region: r => String(r.region).toLowerCase(),
+  brand: r => r.hasTheirs ? 1 : 0,
+  ours: r => r.hasOurs ? 1 : 0
+};
+
+function sortMarketReadingRows(rows) {
+  const { col, dir } = marketReadingSort;
+  const mul = dir === 'asc' ? 1 : -1;
+  const get = marketReadingSortGetters[col] || marketReadingSortGetters.account;
+  return [...rows].sort((a, b) => {
+    const va = get(a), vb = get(b);
+    if (va < vb) return -1 * mul;
+    if (va > vb) return 1 * mul;
+    // Tiebreak keeps the table readable and the order deterministic: carrying accounts
+    // first, then alphabetical.
+    if (a.hasTheirs !== b.hasTheirs) return a.hasTheirs ? -1 : 1;
+    return a.account.localeCompare(b.account);
+  });
+}
+
+const MARKET_READING_WORKBOOK = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets>
+<sheet name="Market Reading" sheetId="1" r:id="rId1"/>
+</sheets>
+</workbook>`;
+
+// Reuses the same single-sheet xlsx plumbing as the SKU Breakdown export (buildZip +
+// rowsToSheetXml), so there's one Excel writer in this file rather than two.
+function exportMarketReadingToExcel() {
+  if (!marketReadingLastRows.length) return;
+  const rows = [marketReadingLastHeaders].concat(
+    marketReadingLastRows.map(r => [r.account, r.type, r.region, r.theirsText, r.oursText])
+  );
+  const files = [
+    { name: '[Content_Types].xml', data: new TextEncoder().encode(SKU_BREAKDOWN_CONTENT_TYPES) },
+    { name: '_rels/.rels', data: new TextEncoder().encode(XLSX_RELS) },
+    { name: 'xl/workbook.xml', data: new TextEncoder().encode(MARKET_READING_WORKBOOK) },
+    { name: 'xl/_rels/workbook.xml.rels', data: new TextEncoder().encode(SKU_BREAKDOWN_WORKBOOK_RELS) },
+    { name: 'xl/styles.xml', data: new TextEncoder().encode(XLSX_STYLES) },
+    { name: 'xl/worksheets/sheet1.xml', data: new TextEncoder().encode(rowsToSheetXml(rows)) }
+  ];
+  const blob = buildZip(files);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeBrand = (marketReadingQuery || 'Brand').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') || 'Brand';
+  a.download = `Market_Reading_${safeBrand}_${todayISO()}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Only the results block re-renders as the user types, so the input keeps focus and caret
+// position — same approach as the Search SKU view.
+function renderMarketReadingResults() {
+  const el = document.getElementById('marketReadingResults');
+  if (!el) return;
+  const resolved = resolveMarketReadingInput(marketReadingQuery);
+
+  if (resolved.status === 'empty') {
+    marketReadingLastRows = [];
+    el.innerHTML = `<div class="empty-msg">Type or pick an ${HEINEKEN_LABEL} brand above to see which accounts carry it, and what we have alongside it.</div>`;
+    return;
+  }
+  if (resolved.status === 'nomatch') {
+    marketReadingLastRows = [];
+    el.innerHTML = `<div class="empty-msg">No ${HEINEKEN_LABEL} SKU matches “${escapeHtml(resolved.brand)}” in the accounts currently in scope.</div>`;
+    return;
+  }
+  if (resolved.status === 'ambiguous') {
+    marketReadingLastRows = [];
+    el.innerHTML = `<div class="empty-msg">“${escapeHtml(resolved.brand)}” is listed in more than one category. Pick which one:</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+        ${resolved.categories.map(c => `<button class="btn mr-cat-pick" type="button" data-pick="${escapeHtml(resolved.brand + ' (' + c + ')')}">${escapeHtml(c)}</button>`).join('')}
+      </div>`;
+    el.querySelectorAll('.mr-cat-pick').forEach(btn => {
+      btn.addEventListener('click', () => {
+        marketReadingQuery = btn.dataset.pick;
+        const input = document.getElementById('marketReadingInput');
+        if (input) input.value = marketReadingQuery;
+        renderMarketReadingResults();
+      });
+    });
+    return;
+  }
+
+  const { brand, category } = resolved;
+  const rows = sortMarketReadingRows(computeMarketReadingRows(brand, category));
+  const carrying = rows.filter(r => r.hasTheirs).length;
+  const brandCol = `${brand} Price`;
+  const oursCol = `Our ${category} Here`;
+  marketReadingLastRows = rows;
+  marketReadingLastHeaders = ['Account', 'Type', 'Region', brandCol, oursCol];
+
+  const arrow = col => marketReadingSort.col === col ? (marketReadingSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const filterParts = [];
+  if (accountTypeFilterEl.value) filterParts.push(`Type: ${accountTypeFilterEl.value}`);
+  if (accountRegionFilterEl.value) filterParts.push(`Region: ${accountRegionFilterEl.value}`);
+  if (accountManagerFilterEl.value) filterParts.push(`Account Manager: ${accountManagerFilterEl.value}`);
+  const scope = filterParts.length ? `Filtered: ${filterParts.join(' · ')}` : 'All Accounts';
+
+  el.innerHTML = `
+    <div class="share-meta" style="margin-bottom:12px;">
+      ${escapeHtml(scope)} — <strong>${carrying}</strong> of ${rows.length} account${rows.length === 1 ? '' : 's'} carry ${escapeHtml(brand)} (${escapeHtml(category)})
+    </div>
+    <div style="margin-bottom:14px;">
+      <button id="marketReadingExportBtn" class="btn" type="button">⬇ Export to Excel</button>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="overview-table" id="marketReadingTable">
+        <thead>
+          <tr>
+            <th class="sortable" data-sort="account">Account${arrow('account')}</th>
+            <th class="sortable" data-sort="type">Type${arrow('type')}</th>
+            <th class="sortable" data-sort="region">Region${arrow('region')}</th>
+            <th class="sortable" data-sort="brand">${escapeHtml(brandCol)}${arrow('brand')}</th>
+            <th class="sortable" data-sort="ours">${escapeHtml(oursCol)}${arrow('ours')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `<tr${r.hasTheirs ? '' : ' class="row-not-listed"'}>
+            <td>${escapeHtml(r.account)}</td>
+            <td>${escapeHtml(r.type)}</td>
+            <td>${escapeHtml(r.region)}</td>
+            <td>${escapeHtml(r.theirsText)}</td>
+            <td>${escapeHtml(r.oursText)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  el.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      if (marketReadingSort.col === col) {
+        marketReadingSort.dir = marketReadingSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        marketReadingSort.col = col;
+        marketReadingSort.dir = (col === 'brand' || col === 'ours') ? 'desc' : 'asc';
+      }
+      renderMarketReadingResults();
+    });
+  });
+  const exportBtn = document.getElementById('marketReadingExportBtn');
+  if (exportBtn) exportBtn.addEventListener('click', exportMarketReadingToExcel);
+}
+
+function renderMarketReading() {
+  addMenuPanel.style.display = 'none';
+  accountDetailsPanel.style.display = 'none';
+  editingAccount = null;
+  const options = marketReadingBrandOptions();
+  content.innerHTML = `
+    <div class="card">
+      <h2 class="section-title">Market Reading — ${HEINEKEN_LABEL} brand footprint</h2>
+      <input type="text" id="marketReadingInput" list="marketReadingBrandOptions"
+             placeholder="e.g. Valmont, Chateau de Granville…"
+             value="${escapeHtml(marketReadingQuery)}" style="width:100%; margin-bottom:16px;">
+      <datalist id="marketReadingBrandOptions">
+        ${options.map(o => `<option value="${escapeHtml(o.label)}"></option>`).join('')}
+      </datalist>
+      <div id="marketReadingResults"></div>
+    </div>
+  `;
+  const input = document.getElementById('marketReadingInput');
+  input.addEventListener('input', () => {
+    marketReadingQuery = input.value;
+    renderMarketReadingResults();
+  });
+  input.focus();
+  renderMarketReadingResults();
+}
+
 /* ---- Search SKU across accounts ---- */
 
 let crossSearchQuery = '';
@@ -2913,6 +3186,13 @@ searchSkuBtn.addEventListener('click', () => {
     crossSearchQuery = '';
     viewMode = 'search';
   }
+  updateModeUI();
+  render();
+});
+
+marketReadingBtn.addEventListener('click', () => {
+  closeSecondaryPanels();
+  viewMode = viewMode === 'marketReading' ? 'account' : 'marketReading';
   updateModeUI();
   render();
 });
