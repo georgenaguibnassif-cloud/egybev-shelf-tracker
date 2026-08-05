@@ -2537,6 +2537,31 @@ function skuMatchesBrand(sku, brand) {
   return sku.toLowerCase().includes(brand.toLowerCase());
 }
 
+// Alternate spellings of the SAME brand as they actually appear in menu data. A plain
+// substring test silently misses all of these, which made real stock look absent and inflated
+// the "we have no answer here" count:
+//   "La Vita Frizzante White" does not contain "Lavita"      (space)
+//   "Valmont White"           does not contain "Aida Valmont" (missing prefix)
+//   bare "Castello"           does not contain "Castello di Trevi"
+//   "Chateau Granville Red"   does not contain "Chateau de Granville" (missing "de")
+//   nothing at all contains "CGM" -- it's listed as Grand Marquis (confirmed with the user),
+//     and "Grand Marguls" is a misspelling that propagated through the Cairo import
+// Terms are matched with the same substring test, so the SHORTEST distinctive form is used
+// where it subsumes the longer one ("Valmont" covers "Aida Valmont *" too). Checked against
+// every distinct wine/sparkling SKU name in the data for false positives before adding.
+const BRAND_ALIASES = {
+  'Lavita': ['Lavita', 'La Vita'],
+  'Aida Valmont': ['Valmont'],
+  'Castello di Trevi': ['Castello', 'Castillo di Trevi'],
+  'Chateau de Granville': ['Chateau de Granville', 'Chateau Granville'],
+  'CGM': ['CGM', 'Grand Marquis', 'Grand Marguls']
+};
+
+function skuMatchesBrandOrAlias(sku, brand) {
+  const terms = BRAND_ALIASES[brand] || [brand];
+  return terms.some(t => skuMatchesBrand(sku, t));
+}
+
 function avgPrice(items) {
   const priced = items.filter(i => i.price != null);
   return priced.length ? priced.reduce((sum, i) => sum + i.price, 0) / priced.length : null;
@@ -2568,10 +2593,10 @@ function pricingGapCellHtml(diffPct, contextLabel) {
 function accountBrandPairSectionHtml(items) {
   const rowsByCategory = {};
   BRAND_PAIRS.forEach(pair => {
-    const oursMatches = items.filter(i => i.side === 'Ours' && skuMatchesBrand(i.sku, pair.ours));
+    const oursMatches = items.filter(i => i.side === 'Ours' && skuMatchesBrandOrAlias(i.sku, pair.ours));
     const theirsMatches = items.filter(i =>
       i.side === 'Heineken' &&
-      skuMatchesBrand(i.sku, pair.theirs) &&
+      skuMatchesBrandOrAlias(i.sku, pair.theirs) &&
       (!pair.theirsCategory || i.category === pair.theirsCategory)
     );
     const categoriesPresent = orderCategories(new Set([
@@ -2684,14 +2709,14 @@ function computeMarketReadingRows() {
     const theirParts = [], ourParts = [], gapOurs = [];
     chosen.forEach(entry => {
       const theirItems = items.filter(i => i.side === 'Heineken'
-        && skuMatchesBrand(i.sku, entry.theirs)
+        && skuMatchesBrandOrAlias(i.sku, entry.theirs)
         && (!entry.theirsCategory || i.category === entry.theirsCategory));
       if (!theirItems.length) return; // they don't stock this one here, nothing to answer
       theirParts.push(...theirItems.map(marketReadingPriceLabel));
       const cats = new Set(theirItems.map(i => i.category));
       const ourItems = items.filter(i => i.side === 'Ours'
         && cats.has(i.category)
-        && entry.ours.some(b => skuMatchesBrand(i.sku, b)));
+        && entry.ours.some(b => skuMatchesBrandOrAlias(i.sku, b)));
       if (ourItems.length) ourParts.push(...ourItems.map(marketReadingPriceLabel));
       // The opportunity is OUR product to place, not their product that's present -- so
       // record the counterpart brands missing here, which is what a rep would actually go
