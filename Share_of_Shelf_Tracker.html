@@ -2681,7 +2681,7 @@ function computeMarketReadingRows() {
   return accountsForTypeFilter().map(name => {
     const items = DATA.accounts[name] || [];
     const info = ACCOUNT_INFO[name] || {};
-    const theirParts = [], ourParts = [], gaps = [];
+    const theirParts = [], ourParts = [], gapOurs = [];
     chosen.forEach(entry => {
       const theirItems = items.filter(i => i.side === 'Heineken'
         && skuMatchesBrand(i.sku, entry.theirs)
@@ -2693,7 +2693,11 @@ function computeMarketReadingRows() {
         && cats.has(i.category)
         && entry.ours.some(b => skuMatchesBrand(i.sku, b)));
       if (ourItems.length) ourParts.push(...ourItems.map(marketReadingPriceLabel));
-      else gaps.push(entry.theirs); // stocked by them, unanswered by us -- the opportunity
+      // The opportunity is OUR product to place, not their product that's present -- so
+      // record the counterpart brands missing here, which is what a rep would actually go
+      // and sell. All of this pair's counterparts are candidates precisely because none of
+      // them are stocked.
+      else gapOurs.push(...entry.ours);
     });
     const carries = theirParts.length > 0;
     return {
@@ -2702,9 +2706,10 @@ function computeMarketReadingRows() {
       region: info.region || '—',
       theirsText: carries ? [...new Set(theirParts)].join(' / ') : '—',
       oursText: ourParts.length ? [...new Set(ourParts)].join(' / ') : '—',
-      opportunityText: gaps.length ? `Yes — ${[...new Set(gaps)].join(', ')}` : (carries ? 'No' : '—'),
+      // Three distinct states, so "—" never has to mean two different things.
+      opportunityText: gapOurs.length ? [...new Set(gapOurs)].join(' / ') : (carries ? 'Covered' : '—'),
       carries,
-      isOpportunity: gaps.length > 0
+      isOpportunity: gapOurs.length > 0
     };
   });
 }
@@ -2782,7 +2787,7 @@ function renderMarketReadingResults() {
 
   if (marketReadingSelected.size === 0) {
     marketReadingLastRows = [];
-    el.innerHTML = `<div class="empty-msg">Pick one or more ${HEINEKEN_LABEL} products above. Accounts carrying <em>any</em> of them will be listed, with our matching brands alongside — and flagged where we have no answer.</div>`;
+    el.innerHTML = `<div class="empty-msg">Pick one or more ${HEINEKEN_LABEL} products above. Accounts carrying <em>any</em> of them will be listed, showing the ${OURS_LABEL} counterparts already there — and, where there are none, which ${OURS_LABEL} product to place.</div>`;
     return;
   }
 
@@ -2793,7 +2798,7 @@ function renderMarketReadingResults() {
   if (marketReadingOpportunityOnly) rows = rows.filter(r => r.isOpportunity);
 
   marketReadingLastRows = rows;
-  marketReadingLastHeaders = ['Account', 'Type', 'Region', `${HEINEKEN_LABEL} Products Here`, 'Our Counterparts Here', 'Opportunity'];
+  marketReadingLastHeaders = ['Account', 'Type', 'Region', `${HEINEKEN_LABEL} Products Here`, `${OURS_LABEL} Counterparts Here`, `Opportunity (${OURS_LABEL} to Place)`];
 
   const arrow = col => marketReadingSort.col === col ? (marketReadingSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   const filterParts = [];
@@ -2812,8 +2817,8 @@ function renderMarketReadingResults() {
             <th class="sortable" data-sort="type">Type${arrow('type')}</th>
             <th class="sortable" data-sort="region">Region${arrow('region')}</th>
             <th class="sortable" data-sort="theirs">${HEINEKEN_LABEL} Products Here${arrow('theirs')}</th>
-            <th class="sortable" data-sort="ours">Our Counterparts Here${arrow('ours')}</th>
-            <th class="sortable" data-sort="opportunity">Opportunity${arrow('opportunity')}</th>
+            <th class="sortable" data-sort="ours">${OURS_LABEL} Counterparts Here${arrow('ours')}</th>
+            <th class="sortable" data-sort="opportunity">Opportunity (${OURS_LABEL} to Place)${arrow('opportunity')}</th>
           </tr>
         </thead>
         <tbody>
