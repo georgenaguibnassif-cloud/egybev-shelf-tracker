@@ -3552,8 +3552,12 @@ async function handleMenuScanFile(file) {
   try {
     let mediaType, data;
     if (file.type === 'application/pdf') {
-      if (file.size > 4 * 1024 * 1024) {
-        throw new Error('PDF is too large (max ~4MB) — try a photo instead.');
+      // Lower than the manual-attach cap below: this path base64-encodes the file into
+      // a JSON POST to /api/extract-menu, which inflates it ~4/3 against Vercel's 4.5MB
+      // request-body limit. Manual attach uploads straight to Storage and isn't capped
+      // by that, so it keeps the larger limit.
+      if (file.size > 3 * 1024 * 1024) {
+        throw new Error('PDF is too large (max ~3MB) — try a photo instead.');
       }
       mediaType = 'application/pdf';
       data = await fileToBase64(file);

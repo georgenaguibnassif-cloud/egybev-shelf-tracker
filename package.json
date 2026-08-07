@@ -1,0 +1,8 @@
+{
+  "name": "egybev-shelf-tracker",
+  "private": true,
+  "description": "Share of Shelf Tracker — static app plus the serverless menu-scanning endpoint.",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0"
+  }
+}

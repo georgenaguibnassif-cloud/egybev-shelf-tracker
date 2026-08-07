@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/Share_of_Shelf_Tracker.html" }
+    { "source": "/((?!api/).*)", "destination": "/Share_of_Shelf_Tracker.html" }
   ]
 }
