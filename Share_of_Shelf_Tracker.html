@@ -425,6 +425,17 @@
   .price-flag-high { background: #fdecea; color: #c0392b; }
   .price-flag-low { background: #eafaf1; color: #1e8449; }
 
+  .activity-stat-num.stat-opportunity { color: var(--ours); }
+  .mr-breakdown-section { margin-top: 4px; }
+  .mr-breakdown-title { font-size: 0.82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 16px 0 8px; }
+  .mr-breakdown-title:first-child { margin-top: 0; }
+  .mr-breakdown-row { display: flex; align-items: center; gap: 12px; margin-bottom: 7px; }
+  .mr-breakdown-label { flex: 0 0 120px; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mr-breakdown-bar { flex: 1 1 auto; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg); display: flex; min-width: 100px; }
+  .mr-breakdown-seg-opportunity { height: 100%; background: var(--ours); }
+  .mr-breakdown-seg-covered { height: 100%; background: var(--heineken); }
+  .mr-breakdown-nums { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+
   #lockScreen {
     position: fixed;
     inset: 0;
@@ -2665,9 +2676,16 @@ function accountBrandPairSectionHtml(items) {
 const marketReadingSelected = new Set();
 let marketReadingOpportunityOnly = false;
 const marketReadingSort = { col: 'opportunity', dir: 'desc' };
-// Exactly what the table last rendered, so the Excel export can't drift from the screen.
+// Exactly what the table (and overview cards/breakdown) last rendered, so neither export
+// format can drift from the screen or from each other — both exports read these, never
+// recompute independently.
 let marketReadingLastRows = [];
 let marketReadingLastHeaders = [];
+let marketReadingLastStats = { total: 0, carrying: 0, opportunities: 0, coveragePct: 0 };
+let marketReadingLastByRegion = [];
+let marketReadingLastByType = [];
+let marketReadingLastBrandsLabel = '';
+let marketReadingLastScopeLabel = '';
 
 // The selectable set comes from BRAND_PAIRS -- the same defined match-ups the Brand Match-ups
 // card uses -- rather than every ABC brand present in the data. "They stock this and we have
@@ -2739,6 +2757,33 @@ function computeMarketReadingRows() {
   });
 }
 
+// Groups the SAME rows the table/cards use (never a separate query), so a region's numbers
+// always sum to the top-line stat cards. "Covered" is carries-but-not-an-opportunity — i.e.
+// ABC's product is here and we already have an answer for it — kept separate from the raw
+// carrying count so a 3-way split (opportunity / covered / not-carrying) is possible in both
+// the on-screen bars and the exports.
+function groupMarketReadingRows(rows, keyFn) {
+  const groups = new Map();
+  rows.forEach(r => {
+    const key = keyFn(r);
+    if (!groups.has(key)) groups.set(key, { name: key, total: 0, carrying: 0, opportunities: 0 });
+    const g = groups.get(key);
+    g.total++;
+    if (r.carries) g.carrying++;
+    if (r.isOpportunity) g.opportunities++;
+  });
+  return [...groups.values()]
+    .map(g => ({ ...g, covered: g.carrying - g.opportunities, coveragePct: g.total ? Math.round((g.carrying / g.total) * 1000) / 10 : 0 }))
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+}
+
+function computeMarketReadingBreakdown(rows) {
+  return {
+    byRegion: groupMarketReadingRows(rows, r => r.region),
+    byType: groupMarketReadingRows(rows, r => r.type)
+  };
+}
+
 const marketReadingSortGetters = {
   account: r => r.account.toLowerCase(),
   type: r => String(r.type).toLowerCase(),
@@ -2764,27 +2809,82 @@ function sortMarketReadingRows(rows) {
   });
 }
 
+// Two sheets — Overview first (so it's the tab Excel opens on), Market Reading second.
+// Distinct from SKU_BREAKDOWN_*'s single-sheet constants since this workbook always has two.
+const MARKET_READING_CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`;
+
 const MARKET_READING_WORKBOOK = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheets>
-<sheet name="Market Reading" sheetId="1" r:id="rId1"/>
+<sheet name="Overview" sheetId="1" r:id="rId1"/>
+<sheet name="Market Reading" sheetId="2" r:id="rId2"/>
 </sheets>
 </workbook>`;
 
-// Reuses the same single-sheet xlsx plumbing as the SKU Breakdown export (buildZip +
-// rowsToSheetXml), so there's one Excel writer in this file rather than two.
+const MARKET_READING_WORKBOOK_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+
+// Every number here reads from marketReadingLastStats/ByRegion/ByType — the exact values the
+// on-screen cards and breakdown just rendered — never a fresh computation, so this sheet
+// can't disagree with what the person exporting was looking at.
+function buildMarketReadingOverviewRows() {
+  const s = marketReadingLastStats;
+  const rows = [
+    ['Market Reading Overview'],
+    ['Generated', todayISO()],
+    [`${HEINEKEN_LABEL} Products`, marketReadingLastBrandsLabel || '(none selected)'],
+    ['Scope', marketReadingLastScopeLabel],
+    [],
+    ['Metric', 'Value'],
+    ['Total Accounts', s.total],
+    ['Carrying (ABC Present)', s.carrying],
+    ['Opportunities (No Answer)', s.opportunities],
+    ['Coverage %', s.coveragePct],
+    []
+  ];
+  function addGroup(title, groups) {
+    rows.push([title, 'Total', 'Carrying', 'Opportunities', 'Covered', 'Coverage %']);
+    groups.forEach(g => rows.push([g.name, g.total, g.carrying, g.opportunities, g.covered, g.coveragePct]));
+    rows.push([]);
+  }
+  addGroup('By Region', marketReadingLastByRegion);
+  addGroup('By Type', marketReadingLastByType);
+  return rows;
+}
+
 function exportMarketReadingToExcel() {
-  if (!marketReadingLastRows.length) return;
-  const rows = [marketReadingLastHeaders].concat(
+  // Same guard as the PDF export: only skip when there's truly nothing in scope, not merely
+  // when "opportunity only" has filtered the detail rows to zero — the Overview sheet still
+  // has real numbers to show in that case.
+  if (!marketReadingLastRows.length && marketReadingLastStats.total === 0) return;
+  const detailRows = [marketReadingLastHeaders].concat(
     marketReadingLastRows.map(r => [r.account, r.type, r.region, r.theirsText, r.oursText, r.opportunityText])
   );
+  const detailSheetOpts = {
+    headerStyleIdx: 1,
+    freezeHeaderRow: true,
+    colWidths: [26, 12, 14, 40, 40, 34]
+  };
   const files = [
-    { name: '[Content_Types].xml', data: new TextEncoder().encode(SKU_BREAKDOWN_CONTENT_TYPES) },
+    { name: '[Content_Types].xml', data: new TextEncoder().encode(MARKET_READING_CONTENT_TYPES) },
     { name: '_rels/.rels', data: new TextEncoder().encode(XLSX_RELS) },
     { name: 'xl/workbook.xml', data: new TextEncoder().encode(MARKET_READING_WORKBOOK) },
-    { name: 'xl/_rels/workbook.xml.rels', data: new TextEncoder().encode(SKU_BREAKDOWN_WORKBOOK_RELS) },
+    { name: 'xl/_rels/workbook.xml.rels', data: new TextEncoder().encode(MARKET_READING_WORKBOOK_RELS) },
     { name: 'xl/styles.xml', data: new TextEncoder().encode(XLSX_STYLES) },
-    { name: 'xl/worksheets/sheet1.xml', data: new TextEncoder().encode(rowsToSheetXml(rows)) }
+    { name: 'xl/worksheets/sheet1.xml', data: new TextEncoder().encode(rowsToSheetXml(buildMarketReadingOverviewRows())) },
+    { name: 'xl/worksheets/sheet2.xml', data: new TextEncoder().encode(rowsToSheetXml(detailRows, detailSheetOpts)) }
   ];
   const blob = buildZip(files);
   const url = URL.createObjectURL(blob);
@@ -2812,6 +2912,10 @@ function renderMarketReadingResults() {
 
   if (marketReadingSelected.size === 0) {
     marketReadingLastRows = [];
+    marketReadingLastStats = { total: 0, carrying: 0, opportunities: 0, coveragePct: 0 };
+    marketReadingLastByRegion = [];
+    marketReadingLastByType = [];
+    marketReadingLastBrandsLabel = '';
     el.innerHTML = `<div class="empty-msg">Pick one or more ${HEINEKEN_LABEL} products above. Accounts carrying <em>any</em> of them will be listed, showing the ${OURS_LABEL} counterparts already there — and, where there are none, which ${OURS_LABEL} product to place.</div>`;
     return;
   }
@@ -2820,10 +2924,19 @@ function renderMarketReadingResults() {
   const totalInScope = rows.length;
   const carrying = rows.filter(r => r.carries).length;
   const opportunities = rows.filter(r => r.isOpportunity).length;
+  const coveragePct = totalInScope ? Math.round((carrying / totalInScope) * 1000) / 10 : 0;
+  // Cards and breakdown always reflect this full in-scope set — computed here, before the
+  // "opportunity only" toggle narrows `rows` for the detail table below, so the toggle only
+  // ever changes what the table shows, never what the cards/breakdown report.
+  const breakdown = computeMarketReadingBreakdown(rows);
   if (marketReadingOpportunityOnly) rows = rows.filter(r => r.isOpportunity);
 
   marketReadingLastRows = rows;
   marketReadingLastHeaders = ['Account', 'Type', 'Region', `${HEINEKEN_LABEL} Products Here`, `${OURS_LABEL} Counterparts Here`, `Opportunity (${OURS_LABEL} to Place)`];
+  marketReadingLastStats = { total: totalInScope, carrying, opportunities, coveragePct };
+  marketReadingLastByRegion = breakdown.byRegion;
+  marketReadingLastByType = breakdown.byType;
+  marketReadingLastBrandsLabel = abcCompetitiveSet().filter(e => marketReadingSelected.has(e.key)).map(marketReadingEntryLabel).join(', ');
 
   const arrow = col => marketReadingSort.col === col ? (marketReadingSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   const filterParts = [];
@@ -2831,6 +2944,40 @@ function renderMarketReadingResults() {
   if (accountRegionFilterEl.value) filterParts.push(`Region: ${accountRegionFilterEl.value}`);
   if (accountManagerFilterEl.value) filterParts.push(`Account Manager: ${accountManagerFilterEl.value}`);
   const scope = filterParts.length ? `Filtered: ${filterParts.join(' · ')}` : 'All Accounts';
+  marketReadingLastScopeLabel = scope;
+
+  const cardsHtml = `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="activity-stats-row">
+        <div class="activity-stat"><div class="activity-stat-num">${totalInScope}</div><div class="activity-stat-label">Total Accounts</div></div>
+        <div class="activity-stat"><div class="activity-stat-num">${carrying}</div><div class="activity-stat-label">Carrying (${HEINEKEN_LABEL})</div></div>
+        <div class="activity-stat"><div class="activity-stat-num stat-opportunity">${opportunities}</div><div class="activity-stat-label">Opportunities</div></div>
+        <div class="activity-stat"><div class="activity-stat-num">${coveragePct}%</div><div class="activity-stat-label">Coverage</div></div>
+      </div>
+    </div>`;
+
+  const breakdownRowHtml = g => {
+    const oppPct = g.total ? (g.opportunities / g.total) * 100 : 0;
+    const coveredPct = g.total ? (g.covered / g.total) * 100 : 0;
+    return `
+      <div class="mr-breakdown-row">
+        <div class="mr-breakdown-label" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</div>
+        <div class="mr-breakdown-bar">
+          <div class="mr-breakdown-seg-opportunity" style="width:${oppPct}%"></div>
+          <div class="mr-breakdown-seg-covered" style="width:${coveredPct}%"></div>
+        </div>
+        <div class="mr-breakdown-nums">${g.carrying}/${g.total} carrying · ${g.opportunities} open</div>
+      </div>`;
+  };
+  const breakdownHtml = (breakdown.byRegion.length || breakdown.byType.length) ? `
+    <div class="card mr-breakdown-section" style="margin-bottom:16px;">
+      ${breakdown.byRegion.length ? `<div class="mr-breakdown-title">By Region</div>${breakdown.byRegion.map(breakdownRowHtml).join('')}` : ''}
+      ${breakdown.byType.length ? `<div class="mr-breakdown-title">By Type</div>${breakdown.byType.map(breakdownRowHtml).join('')}` : ''}
+      <div class="legend" style="margin-top:12px;">
+        <span><span class="dot" style="background:var(--ours);"></span> Opportunity</span>
+        <span><span class="dot" style="background:var(--heineken);"></span> Covered</span>
+      </div>
+    </div>` : '';
 
   const body = rows.length === 0
     ? '<div class="empty-msg">No accounts match — none of the selected products are stocked anywhere unanswered in this scope.</div>'
@@ -2860,12 +3007,15 @@ function renderMarketReadingResults() {
     </div>`;
 
   el.innerHTML = `
+    ${cardsHtml}
+    ${breakdownHtml}
     <div class="share-meta" style="margin-bottom:12px;">
       ${escapeHtml(scope)} — <strong>${carrying}</strong> of ${totalInScope} accounts carry a selected product,
       <strong style="color:var(--ours);">${opportunities}</strong> with no answer from us
     </div>
     <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
       <button id="marketReadingExportBtn" class="btn" type="button">⬇ Export to Excel</button>
+      <button id="marketReadingExportPdfBtn" class="btn" type="button">⬇ Export to PDF</button>
       <label style="font-size:0.9rem;"><input type="checkbox" id="mrOpportunityOnly" ${marketReadingOpportunityOnly ? 'checked' : ''}> Show only opportunities</label>
     </div>
     ${body}`;
@@ -2877,6 +3027,8 @@ function renderMarketReadingResults() {
   });
   const exportBtn = document.getElementById('marketReadingExportBtn');
   if (exportBtn) exportBtn.addEventListener('click', exportMarketReadingToExcel);
+  const exportPdfBtn = document.getElementById('marketReadingExportPdfBtn');
+  if (exportPdfBtn) exportPdfBtn.addEventListener('click', () => exportMarketReadingToPdf(exportPdfBtn));
   el.querySelectorAll('th.sortable').forEach(th => {
     th.addEventListener('click', () => {
       const col = th.dataset.sort;
@@ -4348,6 +4500,18 @@ function pdfDrawShareBar(page, x, y, w, h, ours, heineken, fillPct) {
   if (w - oursW > 0) pdfRect(page, x + oursW, y, w - oursW, h, { fill: PDF_HEIN_RGB });
 }
 
+// Market Reading's breakdown bars: red = opportunity (unanswered), green = covered (ABC's
+// product present and we already have an answer), light gray = rest of the group (doesn't
+// carry it at all) — same red/green convention as pdfDrawShareBar and the on-screen bars.
+function pdfDrawMarketBreakdownBar(page, x, y, w, h, opportunities, covered, total) {
+  pdfRect(page, x, y, w, h, { fill: PDF_TRACK_RGB });
+  if (total <= 0) return;
+  const oppW = w * opportunities / total;
+  const coveredW = w * covered / total;
+  if (oppW > 0) pdfRect(page, x, y, oppW, h, { fill: PDF_OURS_RGB });
+  if (coveredW > 0) pdfRect(page, x + oppW, y, coveredW, h, { fill: PDF_HEIN_RGB });
+}
+
 // pdf-lib is the one external dependency in this otherwise-dependency-free file — merging in
 // an arbitrary real-world menu PDF (scans, img2pdf output, Preview.app recompression, etc.)
 // reliably needs a real PDF parser, which isn't something to hand-roll here the way the report
@@ -4571,6 +4735,158 @@ function generateAccountPdfBytes(account, comment, categories, byGlassOnly) {
   return buildPdfBytes(pages);
 }
 
+/* ---- Market Reading PDF ---- */
+
+// Reads only marketReadingLast* — the same cached state the Excel export and the on-screen
+// cards/table/breakdown just rendered from — so this can never disagree with what the person
+// exporting was looking at, or with the Excel export produced from the same click.
+function generateMarketReadingPdfBytes() {
+  const stats = marketReadingLastStats;
+  const rows = marketReadingLastRows;
+  const contentW = PDF_PAGE_W - PDF_MARGIN * 2;
+  const footerY = PDF_MARGIN + 20;
+
+  const pages = [];
+  let page, y;
+  function startPage() {
+    page = createPdfPage();
+    pages.push(page);
+    y = PDF_PAGE_H - PDF_MARGIN;
+  }
+  function finishPageFooter() {
+    pdfLine(page, PDF_MARGIN, footerY + 10, PDF_PAGE_W - PDF_MARGIN, footerY + 10, { color: PDF_LIGHT_GRAY_RGB, lineWidth: 0.75 });
+    pdfText(page, PDF_MARGIN, footerY, 'Share of Shelf Tracker', { size: 8, color: PDF_GRAY_RGB });
+    const pageLabel = `Page ${pages.length}`;
+    pdfText(page, PDF_PAGE_W - PDF_MARGIN - pdfTextWidth(pageLabel, 8, false), footerY, pageLabel, { size: 8, color: PDF_GRAY_RGB });
+  }
+  function ensureSpace(needed) {
+    if (y - needed < footerY + 20) {
+      finishPageFooter();
+      startPage();
+      pdfText(page, PDF_MARGIN, y, 'Market Reading Report (continued)', { size: 10, bold: true, color: PDF_GRAY_RGB });
+      y -= 22;
+    }
+  }
+
+  startPage();
+
+  // Header
+  pdfText(page, PDF_MARGIN, y, 'Market Reading Report', { size: 11, bold: true, color: PDF_GRAY_RGB });
+  y -= 24;
+  const titleText = `${HEINEKEN_LABEL}: ${marketReadingLastBrandsLabel || '—'}`;
+  pdfText(page, PDF_MARGIN, y, pdfTruncate(titleText, contentW - 160, 18, true), { size: 18, bold: true });
+  const dateStr = `Generated ${todayISO()}`;
+  pdfText(page, PDF_PAGE_W - PDF_MARGIN - pdfTextWidth(dateStr, 9, false), y + 5, dateStr, { size: 9, color: PDF_GRAY_RGB });
+  y -= 18;
+  pdfText(page, PDF_MARGIN, y, marketReadingLastScopeLabel, { size: 10, color: PDF_GRAY_RGB });
+  y -= 14;
+  pdfLine(page, PDF_MARGIN, y, PDF_PAGE_W - PDF_MARGIN, y, { color: PDF_LIGHT_GRAY_RGB, lineWidth: 1 });
+  y -= 30;
+
+  // Overview stat row — four evenly spaced numbers, same shape as the on-screen stat cards
+  const statCells = [
+    { label: 'Total Accounts', value: String(stats.total), color: PDF_BLACK_RGB },
+    { label: `Carrying (${HEINEKEN_LABEL})`, value: String(stats.carrying), color: PDF_BLACK_RGB },
+    { label: 'Opportunities', value: String(stats.opportunities), color: PDF_OURS_RGB },
+    { label: 'Coverage', value: `${stats.coveragePct}%`, color: PDF_BLACK_RGB }
+  ];
+  const cellW = contentW / statCells.length;
+  statCells.forEach((cell, i) => {
+    const cx = PDF_MARGIN + i * cellW;
+    pdfText(page, cx, y, cell.value, { size: 20, bold: true, color: cell.color });
+    pdfText(page, cx, y - 14, cell.label, { size: 8, color: PDF_GRAY_RGB });
+  });
+  y -= 40;
+  pdfLine(page, PDF_MARGIN, y, PDF_PAGE_W - PDF_MARGIN, y, { color: PDF_LIGHT_GRAY_RGB, lineWidth: 1 });
+  y -= 22;
+
+  // Breakdown — Region then Type, each row a labeled 3-segment bar
+  function drawBreakdownSection(title, groups) {
+    if (!groups.length) return;
+    ensureSpace(28);
+    // Extra headroom above the title itself (beyond the trailing gap the previous section
+    // already left) so consecutive sections ("By Region" then "By Type") don't crowd —
+    // visually confirmed this was too tight before.
+    y -= 6;
+    pdfText(page, PDF_MARGIN, y, title, { size: 11, bold: true });
+    y -= 18;
+    const labelW = 110, numsW = 150, barX = PDF_MARGIN + labelW + 8, barW = contentW - labelW - numsW - 16;
+    groups.forEach(g => {
+      ensureSpace(17);
+      pdfText(page, PDF_MARGIN, y - 6, pdfTruncate(g.name, labelW - 6, 9, false), { size: 9 });
+      pdfDrawMarketBreakdownBar(page, barX, y - 9, barW, 9, g.opportunities, g.covered, g.total);
+      const numsText = `${g.carrying}/${g.total} carrying · ${g.opportunities} open`;
+      pdfText(page, barX + barW + 10, y - 6, numsText, { size: 8, color: PDF_GRAY_RGB });
+      y -= 17;
+    });
+    y -= 8;
+  }
+  drawBreakdownSection('By Region', marketReadingLastByRegion);
+  drawBreakdownSection('By Type', marketReadingLastByType);
+
+  // Detail table
+  ensureSpace(30);
+  pdfLine(page, PDF_MARGIN, y, PDF_PAGE_W - PDF_MARGIN, y, { color: PDF_LIGHT_GRAY_RGB, lineWidth: 1 });
+  y -= 18;
+  const cols = [
+    { label: 'Account', w: 110 },
+    { label: 'Type', w: 45 },
+    { label: 'Region', w: 50 },
+    { label: `${HEINEKEN_LABEL} Here`, w: 100 },
+    { label: `${OURS_LABEL} Here`, w: 100 },
+    { label: 'Opportunity', w: 107 }
+  ];
+  function colX(i) { let x = PDF_MARGIN; for (let j = 0; j < i; j++) x += cols[j].w; return x; }
+  function drawTableHeader() {
+    cols.forEach((c, i) => pdfText(page, colX(i), y, c.label, { size: 8.5, bold: true, color: PDF_GRAY_RGB }));
+    y -= 12;
+    pdfLine(page, PDF_MARGIN, y, PDF_PAGE_W - PDF_MARGIN, y, { color: PDF_LIGHT_GRAY_RGB, lineWidth: 0.5 });
+    y -= 12;
+  }
+  drawTableHeader();
+  if (rows.length === 0) {
+    pdfText(page, PDF_MARGIN, y, 'No accounts match the current filters.', { size: 9, color: PDF_GRAY_RGB });
+    y -= 14;
+  }
+  rows.forEach(r => {
+    ensureSpace(16);
+    const cells = [r.account, r.type, r.region, r.theirsText, r.oursText, r.opportunityText];
+    cells.forEach((val, i) => {
+      const opts = { size: 8 };
+      if (i === 5 && r.isOpportunity) opts.color = PDF_OURS_RGB;
+      pdfText(page, colX(i), y, pdfTruncate(val, cols[i].w - 6, 8, false), opts);
+    });
+    y -= 10;
+    pdfLine(page, PDF_MARGIN, y, PDF_PAGE_W - PDF_MARGIN, y, { color: PDF_TRACK_RGB, lineWidth: 0.4 });
+    y -= 10;
+  });
+
+  finishPageFooter();
+  return buildPdfBytes(pages);
+}
+
+async function exportMarketReadingToPdf(btn) {
+  if (!marketReadingLastRows.length && marketReadingLastStats.total === 0) return;
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  try {
+    const bytes = generateMarketReadingPdfBytes();
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Market_Reading_${todayISO()}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+}
+
 /* ---- Export to Excel ---- */
 
 function crc32(bytes) {
@@ -4668,22 +4984,37 @@ function colLetter(n) {
   return s;
 }
 
-function cellXml(colIdx, rowIdx, value) {
+function cellXml(colIdx, rowIdx, value, styleIdx) {
   const ref = colLetter(colIdx) + rowIdx;
+  const s = styleIdx != null ? ` s="${styleIdx}"` : '';
   if (typeof value === 'number' && isFinite(value)) {
-    return `<c r="${ref}"><v>${value}</v></c>`;
+    return `<c r="${ref}"${s}><v>${value}</v></c>`;
   }
   const str = value === null || value === undefined ? '' : String(value);
-  return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(str)}</t></is></c>`;
+  return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(str)}</t></is></c>`;
 }
 
-function rowsToSheetXml(rows) {
+// opts is optional and additive — every existing caller (SKU Tracker, Summary, Visit Notes,
+// SKU Breakdown) passes nothing and gets byte-identical output to before. Market Reading is
+// the first caller to opt into styling:
+//   headerStyleIdx  — style index (from XLSX_STYLES) applied to every cell in row 1
+//   colWidths       — array of column widths in Excel's character-width units
+//   freezeHeaderRow — keeps row 1 visible while scrolling
+function rowsToSheetXml(rows, opts) {
+  opts = opts || {};
   const rowXml = rows.map((row, i) => {
     const rowIdx = i + 1;
-    const cells = row.map((val, j) => cellXml(j + 1, rowIdx, val)).join('');
+    const headerStyle = (opts.headerStyleIdx != null && rowIdx === 1) ? opts.headerStyleIdx : undefined;
+    const cells = row.map((val, j) => cellXml(j + 1, rowIdx, val, headerStyle)).join('');
     return `<row r="${rowIdx}">${cells}</row>`;
   }).join('');
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowXml}</sheetData></worksheet>`;
+  const viewsXml = opts.freezeHeaderRow
+    ? '<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>'
+    : '';
+  const colsXml = opts.colWidths
+    ? `<cols>${opts.colWidths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>`
+    : '';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${viewsXml}${colsXml}<sheetData>${rowXml}</sheetData></worksheet>`;
 }
 
 function buildSkuTrackerRows() {
@@ -4748,13 +5079,17 @@ const XLSX_WORKBOOK_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes
 <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`;
 
+// Style index 0 stays exactly what every existing export (SKU Tracker, Summary, Visit Notes,
+// SKU Breakdown) has always referenced implicitly — cellXml omits `s` when no style is passed,
+// which OOXML treats as style 0, so adding index 1 here can't change any of their output.
+// Index 1 is a bold variant of the same font, used only for Market Reading's header row.
 const XLSX_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
+<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
 <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
 <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
+<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>
 </styleSheet>`;
 
 function exportToExcel() {
