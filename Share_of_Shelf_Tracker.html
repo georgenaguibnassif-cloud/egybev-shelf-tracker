@@ -3202,6 +3202,37 @@ function renderMarketReadingResults() {
   });
 }
 
+// Display-only grouping+order for the brand picker panel below -- distinct from theirsCategory
+// (the data field abcCompetitiveSet() carries for matching), since Aida Valmont has no
+// theirsCategory set yet reads as Sparkling to a rep, same as Chateau de Granville which does
+// carry theirsCategory='Sparkling'. Purely cosmetic: doesn't touch checkbox behavior, matching,
+// or the "vs" labels -- anything not listed here still renders, just ungrouped at the end, so a
+// future BRAND_PAIRS addition can never silently disappear from the picker.
+const MR_PICKER_GROUPS = [
+  { label: 'Sparkling', theirs: ['Aida Valmont', 'Chateau de Granville'] },
+  { label: 'Wine', theirs: ['Cape Bay', 'Castello di Trevi', 'CGM', 'Omar Khayyam'] }
+];
+
+function marketReadingPickerCheckboxHtml(e) {
+  return `<label><input type="checkbox" class="mr-brand-cb" value="${escapeHtml(e.key)}" ${marketReadingSelected.has(e.key) ? 'checked' : ''}> ${escapeHtml(marketReadingEntryLabel(e))}<span class="cat-tag">vs ${escapeHtml(e.ours.join(' / '))}</span></label>`;
+}
+
+function marketReadingPickerGroupsHtml(entries) {
+  const byTheirs = new Map(entries.map(e => [e.theirs, e]));
+  const used = new Set();
+  const groupsHtml = MR_PICKER_GROUPS.map(g => {
+    const groupEntries = g.theirs.map(name => byTheirs.get(name)).filter(Boolean);
+    groupEntries.forEach(e => used.add(e.key));
+    if (!groupEntries.length) return '';
+    return `<div class="sku-filter-group"><div class="sku-filter-group-title">${escapeHtml(g.label)}</div>${groupEntries.map(marketReadingPickerCheckboxHtml).join('')}</div>`;
+  }).join('');
+  const leftovers = entries.filter(e => !used.has(e.key));
+  const leftoversHtml = leftovers.length
+    ? `<div class="sku-filter-group">${leftovers.map(marketReadingPickerCheckboxHtml).join('')}</div>`
+    : '';
+  return groupsHtml + leftoversHtml;
+}
+
 function renderMarketReading() {
   addMenuPanel.style.display = 'none';
   accountDetailsPanel.style.display = 'none';
@@ -3217,9 +3248,7 @@ function renderMarketReading() {
             <span>${HEINEKEN_LABEL} products</span>
             <button id="mrPickerClear" class="btn-danger" type="button">Clear</button>
           </div>
-          <div class="sku-filter-group">
-            ${entries.map(e => `<label><input type="checkbox" class="mr-brand-cb" value="${escapeHtml(e.key)}" ${marketReadingSelected.has(e.key) ? 'checked' : ''}> ${escapeHtml(marketReadingEntryLabel(e))}<span class="cat-tag">vs ${escapeHtml(e.ours.join(' / '))}</span></label>`).join('')}
-          </div>
+          ${marketReadingPickerGroupsHtml(entries)}
         </div>
       </div>
       <div id="marketReadingResults"></div>
