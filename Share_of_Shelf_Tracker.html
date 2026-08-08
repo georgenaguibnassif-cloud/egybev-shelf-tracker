@@ -116,7 +116,7 @@
     color: var(--text);
     min-width: 240px;
   }
-  input[type="text"] {
+  input[type="text"], input[type="password"], input[type="email"], input[type="number"] {
     font-family: var(--font-body);
     font-size: 0.9rem;
     padding: 9px 12px;
@@ -124,6 +124,8 @@
     border: 1px solid var(--border);
     background: var(--card);
     color: var(--text);
+  }
+  input[type="text"], input[type="password"], input[type="email"] {
     min-width: 200px;
   }
 
@@ -141,14 +143,14 @@
     gap: 24px;
     flex-wrap: wrap;
   }
-  .share-number { font-size: 2.4rem; font-weight: 700; }
+  .share-number { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 2.75rem; }
   .share-meta { color: var(--muted); font-size: 0.9rem; }
   .bar-track {
     flex: 1 1 240px;
     height: 14px;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     overflow: hidden;
-    background: var(--heineken);
+    background: var(--color-neutral-300);
     display: flex;
     min-width: 180px;
   }
@@ -178,14 +180,14 @@
 
   table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
   th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  th { color: var(--muted); font-weight: 700; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 2px solid var(--border); }
   td.price { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
   .cat-tag {
     display: inline-block;
     font-size: 0.72rem;
     color: var(--muted);
     background: var(--bg);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     padding: 1px 6px;
     margin-top: 2px;
   }
@@ -266,12 +268,12 @@
     z-index: 30;
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     padding: 14px;
     width: 300px;
     max-height: 380px;
     overflow-y: auto;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+    box-shadow: var(--shadow-lg);
   }
   .sku-filter-panel-header {
     display: flex;
@@ -353,8 +355,8 @@
   .scan-menu-status { font-size: 0.82rem; color: var(--muted); }
   .scan-menu-status.error { color: var(--ours); }
   #newSkuTable input.row-sku.unmatched {
-    border-color: #f59e0b;
-    box-shadow: 0 0 0 1px #f59e0b;
+    border-color: var(--color-accent-600);
+    box-shadow: 0 0 0 1px var(--color-accent-600);
   }
 
   #newSkuTable { margin-bottom: 12px; min-width: 760px; }
@@ -362,7 +364,7 @@
   #newSkuTable input[type="text"], #newSkuTable input[type="number"] {
     width: 100%;
     padding: 6px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--border);
     font-size: 0.85rem;
     min-width: 80px;
@@ -372,7 +374,7 @@
     padding: 6px 8px;
     min-width: 90px;
     font-size: 0.85rem;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--border);
   }
   #newSkuTable td { padding: 6px 4px; }
@@ -396,7 +398,7 @@
   .note-form input[type="date"] {
     align-self: flex-start;
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--border);
     font-size: 0.85rem;
     background: var(--card);
@@ -405,7 +407,7 @@
   .note-form textarea {
     width: 100%;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--border);
     font-size: 0.9rem;
     font-family: inherit;
@@ -416,7 +418,7 @@
   }
   .note-form .btn { align-self: flex-start; }
   .notes-list { display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto; }
-  .note-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+  .note-item { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; background: var(--bg); }
   .note-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
   .note-date { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
   .note-delete { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 4px; margin-left: auto; }
@@ -431,9 +433,9 @@
     font-size: 0.72rem;
     font-weight: 600;
     padding: 3px 10px;
-    border-radius: 999px;
-    background: #e5e7eb;
-    color: #374151;
+    border-radius: var(--radius-sm);
+    background: var(--color-neutral-200);
+    color: var(--color-neutral-800);
   }
   .contact-phone-text { font-size: 0.85rem; color: var(--muted); }
   .contact-icon-btn {
@@ -443,7 +445,7 @@
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    background: #fff;
+    background: var(--color-bg);
     border: 1px solid var(--border);
     text-decoration: none;
     font-size: 0.9rem;
@@ -456,20 +458,20 @@
   .order-summary-label { flex: 1 1 auto; min-width: 160px; }
   .qty-stepper { display: flex; align-items: center; gap: 4px; }
   .qty-btn {
-    width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border);
+    width: 26px; height: 26px; border-radius: var(--radius-md); border: 1px solid var(--border);
     background: var(--card); color: var(--text); font-size: 1rem; line-height: 1; cursor: pointer;
   }
   .qty-btn:hover { background: var(--bg); }
   .order-qty-input {
-    width: 46px; text-align: center; padding: 4px 2px; border-radius: 6px;
+    width: 46px; text-align: center; padding: 4px 2px; border-radius: var(--radius-md);
     border: 1px solid var(--border); font-size: 0.88rem;
   }
-  .order-total-row { text-align: right; font-weight: 700; font-size: 0.95rem; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .order-total-row { text-align: right; font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 1.375rem; margin-top: 10px; padding-top: 10px; border-top: 2px solid var(--border); }
   .note-photo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .note-photo { display: block; max-width: 160px; max-height: 160px; border-radius: 6px; margin-top: 8px; border: 1px solid var(--border); }
+  .note-photo { display: block; max-width: 160px; max-height: 160px; border-radius: var(--radius-md); margin-top: 8px; border: 1px solid var(--border); }
   .pending-tag {
     font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
-    color: #92400e; background: #fef3c7; padding: 2px 8px; border-radius: 999px;
+    color: var(--color-accent-800); background: var(--color-accent-100); padding: 2px 8px; border-radius: var(--radius-sm);
   }
 
   .overview-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
@@ -478,10 +480,16 @@
   .overview-row { cursor: pointer; }
   .overview-row:hover td { background: var(--bg); }
 
-  .activity-stats-row { display: flex; gap: 24px; flex-wrap: wrap; }
-  .activity-stat { text-align: center; min-width: 100px; }
-  .activity-stat-num { font-size: 1.8rem; font-weight: 700; color: var(--text); }
-  .activity-stat-label { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+  .activity-stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    border-top: 2px solid var(--border);
+    border-bottom: 2px solid var(--border);
+  }
+  .activity-stat { text-align: left; padding: var(--space-4) var(--space-3); border-left: 2px solid var(--border); }
+  .activity-stat:first-child { border-left: none; }
+  .activity-stat-num { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 2.1rem; line-height: 1; color: var(--text); }
+  .activity-stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: var(--space-2); }
 
   .price-flag {
     display: inline-block;
@@ -489,12 +497,12 @@
     font-weight: 600;
     margin-left: 6px;
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     vertical-align: middle;
     white-space: nowrap;
   }
-  .price-flag-high { background: #fdecea; color: #c0392b; }
-  .price-flag-low { background: #eafaf1; color: #1e8449; }
+  .price-flag-high { background: var(--color-accent-100); color: var(--color-accent-800); }
+  .price-flag-low { background: var(--color-neutral-200); color: var(--color-neutral-800); }
 
   .activity-stat-num.stat-opportunity { color: var(--ours); }
   .mr-breakdown-section { margin-top: 4px; }
@@ -502,7 +510,7 @@
   .mr-breakdown-title:first-child { margin-top: 0; }
   .mr-breakdown-row { display: flex; align-items: center; gap: 12px; margin-bottom: 7px; }
   .mr-breakdown-label { flex: 0 0 120px; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .mr-breakdown-bar { flex: 1 1 auto; height: 12px; border-radius: 6px; overflow: hidden; background: var(--bg); display: flex; min-width: 100px; }
+  .mr-breakdown-bar { flex: 1 1 auto; height: 12px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-neutral-300); display: flex; min-width: 100px; }
   .mr-breakdown-seg-opportunity { height: 100%; background: var(--ours); }
   .mr-breakdown-seg-covered { height: 100%; background: var(--heineken); }
   .mr-breakdown-nums { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
@@ -534,14 +542,14 @@
   #confirmModalOverlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.45);
+    background: color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
     display: none;
     align-items: center;
     justify-content: center;
     z-index: 2000;
     padding: 20px;
   }
-  #confirmModalOverlay .card { max-width: 380px; width: 100%; }
+  #confirmModalOverlay .card { max-width: 380px; width: 100%; box-shadow: var(--shadow-lg); }
   #confirmModalMessage { white-space: pre-line; margin-bottom: 16px; }
   #confirmModalActions { display: flex; gap: 10px; justify-content: flex-end; }
 </style>
