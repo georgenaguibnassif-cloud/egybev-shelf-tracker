@@ -191,6 +191,12 @@
     padding: 1px 6px;
     margin-top: 2px;
   }
+  .side-tag {
+    display: inline-flex; align-items: center; font-size: 0.72rem;
+    letter-spacing: 0.02em; padding: 3px 9px; border-radius: var(--radius-sm);
+  }
+  .side-tag-ours { background: var(--color-accent-100); color: var(--color-accent-800); }
+  .side-tag-heineken { background: var(--color-neutral-300); color: var(--color-neutral-800); }
   .order-cat-heading { font-size: 0.82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 18px 0 4px; }
   .order-cat-heading:first-of-type { margin-top: 0; }
   .glass-note { color: var(--muted); font-size: 0.76rem; }
@@ -434,7 +440,7 @@
     font-weight: 600;
     padding: 3px 10px;
     border-radius: var(--radius-sm);
-    background: var(--color-neutral-200);
+    background: var(--color-neutral-300);
     color: var(--color-neutral-800);
   }
   .contact-phone-text { font-size: 0.85rem; color: var(--muted); }
@@ -502,7 +508,7 @@
     white-space: nowrap;
   }
   .price-flag-high { background: var(--color-accent-100); color: var(--color-accent-800); }
-  .price-flag-low { background: var(--color-neutral-200); color: var(--color-neutral-800); }
+  .price-flag-low { background: var(--color-neutral-300); color: var(--color-neutral-800); }
 
   .activity-stat-num.stat-opportunity { color: var(--ours); }
   .mr-breakdown-section { margin-top: 4px; }
@@ -3217,7 +3223,7 @@ function renderSearchResults() {
     <tr class="overview-row" data-account="${escapeHtml(m.acct)}">
       <td>${escapeHtml(m.acct)}</td>
       <td>${escapeHtml(m.item.sku)}<div class="cat-tag">${escapeHtml(categoryDisplayLabel(m.item))}${m.item.subtype ? ' · ' + escapeHtml(m.item.subtype) : ''}</div></td>
-      <td><span class="dot ${m.item.side === 'Ours' ? 'ours' : (m.item.side === 'Heineken' ? 'heineken' : '')}" style="display:inline-block;"></span> ${sideLabel(m.item.side)}</td>
+      <td><span class="side-tag ${m.item.side === 'Ours' ? 'side-tag-ours' : 'side-tag-heineken'}">${escapeHtml(sideLabel(m.item.side))}</span></td>
       <td class="num">${fmtPrice(m.item.price)}</td>
     </tr>
   `).join('');
