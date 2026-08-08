@@ -600,18 +600,12 @@
     </select>
     <select id="accountRegionFilter">
       <option value="">Select Region</option>
-      <option value="El Gouna">El Gouna</option>
-      <option value="Cairo">Cairo</option>
-      <option value="North Coast">North Coast</option>
     </select>
     <select id="accountSelect">
       <option value="">Select an account…</option>
     </select>
     <select id="accountTypeFilter">
       <option value="">All Types</option>
-      <option value="Hotels">Hotels</option>
-      <option value="Outlets">Outlets</option>
-      <option value="Retail">Retail</option>
     </select>
     <div class="sku-filter-dropdown" id="skuFilterDropdown">
       <button id="skuFilterToggleBtn" class="btn" type="button">All SKUs</button>
@@ -1631,6 +1625,69 @@ async function rebuildAccountManagerFilter() {
   accountManagerFilterEl.innerHTML = '<option value="">Select Account Manager</option>' +
     names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
   if (names.includes(currentVal)) accountManagerFilterEl.value = currentVal;
+}
+
+// Region and Type used to be hardcoded <option> lists that could drift from the real data
+// (a region typo'd differently, or a new one added, would silently never show up as filterable).
+// Derived from ACCOUNT_INFO instead -- already an in-memory mirror of accounts_meta, loaded by
+// loadAllData() -- same reasoning as rebuildAccountManagerFilter() above, just no extra query
+// needed since accounts_meta is already in hand.
+function rebuildRegionAndTypeFilters() {
+  const currentRegion = accountRegionFilterEl.value;
+  const currentType = accountTypeFilterEl.value;
+  const regions = new Set();
+  const types = new Set();
+  Object.values(ACCOUNT_INFO).forEach(info => {
+    if (info.region) regions.add(info.region);
+    if (info.type) types.add(info.type);
+  });
+  const sortedRegions = Array.from(regions).sort((a, b) => a.localeCompare(b));
+  const sortedTypes = Array.from(types).sort((a, b) => a.localeCompare(b));
+  accountRegionFilterEl.innerHTML = '<option value="">Select Region</option>' +
+    sortedRegions.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+  accountTypeFilterEl.innerHTML = '<option value="">All Types</option>' +
+    sortedTypes.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  if (sortedRegions.includes(currentRegion)) accountRegionFilterEl.value = currentRegion;
+  if (sortedTypes.includes(currentType)) accountTypeFilterEl.value = currentType;
+}
+
+// Makes Account Manager / Region / Type mutually aware: an option is disabled (not removed) the
+// moment it would leave zero accounts in scope given the OTHER two filters' current values --
+// same matching logic as accountsForTypeFilter(), just computed one dimension at a time so each
+// dropdown can be judged against the other two without including its own current value. A
+// filter that's already selected is never force-cleared here, even if that selection becomes
+// disabled by a later change elsewhere -- it just now honestly shows zero accounts, which is
+// the point (see the handoff spec this was built from for why that's intentional).
+function updateFilterAvailability() {
+  const typeVal = accountTypeFilterEl.value;
+  const managerVal = accountManagerFilterEl.value;
+  const regionVal = accountRegionFilterEl.value;
+  const names = Object.keys(DATA.accounts);
+
+  function availableValuesFor(dim) {
+    const set = new Set();
+    names.forEach(n => {
+      const info = ACCOUNT_INFO[n];
+      if (!info) return;
+      if (dim !== 'type' && typeVal && info.type !== typeVal) return;
+      if (dim !== 'manager' && managerVal && info.accountManager !== managerVal) return;
+      if (dim !== 'region' && regionVal && info.region !== regionVal) return;
+      const v = dim === 'type' ? info.type : dim === 'manager' ? info.accountManager : info.region;
+      if (v) set.add(v);
+    });
+    return set;
+  }
+
+  const applyAvailability = (selectEl, availableSet) => {
+    Array.from(selectEl.options).forEach(opt => {
+      if (!opt.value) return; // the blank "All"/"Select…" option always stays enabled
+      opt.disabled = !availableSet.has(opt.value);
+    });
+  };
+
+  applyAvailability(accountTypeFilterEl, availableValuesFor('type'));
+  applyAvailability(accountManagerFilterEl, availableValuesFor('manager'));
+  applyAvailability(accountRegionFilterEl, availableValuesFor('region'));
 }
 
 // Single source of truth for "which accounts do the active Type/Manager/Region filters leave
@@ -3509,6 +3566,7 @@ accountTypeFilterEl.addEventListener('change', () => {
   closeSecondaryPanels();
   select.value = '';
   populateAccountSelect('');
+  updateFilterAvailability();
   updateModeUI();
   render();
 });
@@ -3516,6 +3574,7 @@ accountManagerFilterEl.addEventListener('change', () => {
   closeSecondaryPanels();
   select.value = '';
   populateAccountSelect('');
+  updateFilterAvailability();
   updateModeUI();
   render();
 });
@@ -3523,6 +3582,7 @@ accountRegionFilterEl.addEventListener('change', () => {
   closeSecondaryPanels();
   select.value = '';
   populateAccountSelect('');
+  updateFilterAvailability();
   updateModeUI();
   render();
 });
@@ -4200,6 +4260,8 @@ saveMenuBtn.addEventListener('click', async () => {
   populateAccountSelect(name);
   rebuildCategoryFilter();
   await rebuildAccountManagerFilter();
+  rebuildRegionAndTypeFilters();
+  updateFilterAvailability();
   addMenuPanel.style.display = 'none';
   editingAccount = null;
   saveMenuBtn.disabled = false;
@@ -5341,6 +5403,8 @@ async function refreshData() {
     populateAccountSelect(select.value);
     rebuildCategoryFilter();
     await rebuildAccountManagerFilter();
+    rebuildRegionAndTypeFilters();
+    updateFilterAvailability();
     render();
     flushPendingNotes();
   } catch (e) {
@@ -5375,6 +5439,8 @@ async function startApp() {
   populateAccountSelect('');
   rebuildCategoryFilter();
   await rebuildAccountManagerFilter();
+  rebuildRegionAndTypeFilters();
+  updateFilterAvailability();
   if (location.hash === NEW_ACCOUNT_HASH && isEditor()) {
     openNewAccountRoute();
   } else {
