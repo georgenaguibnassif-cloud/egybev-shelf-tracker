@@ -1648,12 +1648,22 @@ function updateCategoryCheckboxState() {
 // existing ones). PROFILE_ID_BY_NAME is rebuilt alongside this — it maps a display_name back
 // to that person's real auth id, used to keep accounts_meta.owner_id (the actual RLS-checked
 // ownership link) in sync whenever "Edit Account Details" reassigns the account_manager label.
+//
+// Some accounts_meta.account_manager labels have no matching login at all (e.g. "Ziad" —
+// 43 accounts with that text label but no profiles row, so no owner_id and no real login).
+// Those still show up here as plain filter options — just to browse/narrow to them, since a
+// Manager/Owner can already edit them regardless — but they never resolve through
+// PROFILE_ID_BY_NAME, so reassigning to one of them intentionally leaves owner_id null.
 let PROFILE_ID_BY_NAME = new Map();
 async function rebuildAccountManagerFilter() {
   const currentVal = accountManagerFilterEl.value;
   const rows = await sb('profiles?select=id,display_name&role=in.(rep,owner)&order=display_name');
-  const names = rows.map(r => r.display_name);
   PROFILE_ID_BY_NAME = new Map(rows.map(r => [r.display_name, r.id]));
+  const unlinkedLabels = new Set();
+  Object.values(ACCOUNT_INFO).forEach(info => {
+    if (info.accountManager && !PROFILE_ID_BY_NAME.has(info.accountManager)) unlinkedLabels.add(info.accountManager);
+  });
+  const names = [...rows.map(r => r.display_name), ...unlinkedLabels].sort((a, b) => a.localeCompare(b));
   accountManagerFilterEl.innerHTML = '<option value="">Select Account Manager</option>' +
     names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
   if (names.includes(currentVal)) accountManagerFilterEl.value = currentVal;
