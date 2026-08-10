@@ -244,6 +244,12 @@
   .btn-primary { background: var(--ours); border-color: var(--ours); color: var(--color-bg); }
   .btn-primary:hover { background: var(--color-accent-600); border-color: var(--color-accent-600); }
   .btn-block { display: block; width: 100%; text-align: center; }
+  /* Marks whichever nav button (Overview / Search SKU / Market Reading / Create Order / Add New
+     Account) matches the current viewMode -- same filled-accent treatment as .btn-primary so it
+     reads as "selected" using a language the app already establishes, kept as its own class since
+     it's a persistent state marker rather than a momentary primary-action button. */
+  .btn-mode-active, .btn-mode-active:disabled { background: var(--ours); border-color: var(--ours); color: var(--color-bg); opacity: 1; }
+  .btn-mode-active:hover { background: var(--color-accent-600); border-color: var(--color-accent-600); }
   .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: var(--space-3); }
   .field > label { font-size: 12px; color: var(--muted); }
   .field > .input {
@@ -1907,8 +1913,19 @@ function render() {
   renderAccountView();
 }
 
+// Which nav button corresponds to each non-default viewMode -- 'account' (the default account
+// view) has no button of its own, so nothing gets marked active while on it.
+const MODE_BUTTONS = [
+  [overviewBtn, 'overview'],
+  [searchSkuBtn, 'search'],
+  [marketReadingBtn, 'marketReading'],
+  [createOrderBtn, 'order'],
+  [addMenuBtn, 'newAccount']
+];
+
 function updateModeUI() {
   accountFilterRowEl.style.display = (viewMode === 'account' || viewMode === 'overview') ? '' : 'none';
+  MODE_BUTTONS.forEach(([btn, mode]) => btn.classList.toggle('btn-mode-active', viewMode === mode));
 }
 
 // Always the canonical master SKU list (the price lists used for Create Order), stripped of
