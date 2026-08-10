@@ -3570,6 +3570,26 @@ function getOrderBlockMessage(account) {
   return null;
 }
 
+// Reps browsing under a different Account Manager's filter and then creating an order is very
+// likely a mistake -- they should normally only be ordering for their own accounts. Owner/Manager
+// legitimately browse and act on other reps' accounts, so this nudge is rep-only, and it's
+// additional to -- not a replacement for -- the generic getOrderBlockMessage checks above.
+function getRepFilterMismatchMessage(account) {
+  if (!currentProfile || currentProfile.role !== 'rep') return null;
+  const myName = currentProfile.display_name;
+  const filterVal = accountManagerFilterEl.value;
+  if (filterVal && filterVal !== myName) {
+    return `You're browsing ${filterVal}'s accounts — switch the Account Manager filter to your own name to create an order.`;
+  }
+  if (!filterVal) {
+    const manager = resolveAccountManagerProfile(account);
+    if (manager && manager.name !== myName) {
+      return `You're browsing ${manager.name}'s accounts — switch the Account Manager filter to your own name to create an order.`;
+    }
+  }
+  return null;
+}
+
 function renderOrder() {
   if (!isEditor()) {
     viewMode = 'account';
@@ -3680,6 +3700,8 @@ createOrderBtn.addEventListener('click', async () => {
   if (enteringOrder) {
     const blockMsg = getOrderBlockMessage(select.value);
     if (blockMsg) { await showAlert(blockMsg); return; }
+    const repMismatchMsg = getRepFilterMismatchMessage(select.value);
+    if (repMismatchMsg) { await showAlert(repMismatchMsg); return; }
   }
   closeSecondaryPanels();
   viewMode = enteringOrder ? 'order' : 'account';
