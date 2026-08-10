@@ -3530,13 +3530,26 @@ function refreshOrderCatalogPanels() {
   }
 }
 
+// accounts_meta.account_manager is free text -- matching it against profiles.display_name is a
+// plain string comparison with no guarantee it lands on a real, current login (typo, former
+// employee whose profile was removed, etc). This is the ONLY path submitOrder() trusts for a
+// recipient -- a text match that doesn't resolve to a real profiles row (valid id + email) is
+// treated as unresolved, same as no account_manager at all, rather than silently falling back.
+function resolveAccountManagerProfile(accountName) {
+  const info = ACCOUNT_INFO[accountName];
+  if (!info || !info.accountManager) return null;
+  const id = PROFILE_ID_BY_NAME.get(info.accountManager);
+  const email = PROFILE_EMAIL_BY_NAME.get(info.accountManager);
+  if (!id || !email) return null;
+  return { id, email, name: info.accountManager };
+}
+
 // An order needs both an account AND that account's Account Manager set -- the manager is who
 // submitOrder() routes the mailto to, so allowing entry without one is exactly what forces the
 // gnaguib@egytas.com fallback to fire in normal use instead of only as a genuine edge case.
 function getOrderBlockMessage(account) {
   if (!account) return 'Select an account before creating an order.';
-  const info = ACCOUNT_INFO[account];
-  if (!info || !info.accountManager) return 'This account has no Account Manager assigned yet.';
+  if (!resolveAccountManagerProfile(account)) return 'This account has no Account Manager assigned yet.';
   return null;
 }
 
@@ -3589,6 +3602,9 @@ function renderOrder() {
   document.getElementById('submitOrderBtn').addEventListener('click', async () => {
     const blockMsg = getOrderBlockMessage(account);
     if (blockMsg) { await showAlert(blockMsg); return; }
+    const manager = resolveAccountManagerProfile(account);
+    const confirmMsg = `Send this order for ${account} to ${manager.name} (${manager.email})?\n\nSubmitted by: ${currentProfile.display_name} (${currentProfile.email})`;
+    if (!(await showConfirm(confirmMsg))) return;
     submitOrder(account);
   });
   document.getElementById('clearOrderBtn').addEventListener('click', () => {
@@ -3606,10 +3622,12 @@ function submitOrder(account) {
   );
   const total = items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const subject = account ? `Order - ${account} - ${todayISO()}` : `Order - ${todayISO()}`;
-  const body = `${account ? `Order for ${account}\n` : ''}Date: ${todayISO()}\n\nItems (${items.length}):\n${lines.join('\n')}\n\nTotal: ${fmtPrice(total)}\n`;
-  const info = account ? ACCOUNT_INFO[account] : null;
-  const managerEmail = info && info.accountManager ? PROFILE_EMAIL_BY_NAME.get(info.accountManager) : null;
-  const toEmail = managerEmail || 'gnaguib@egytas.com';
+  // "Submitted by" comes from the live Auth session's profiles row (currentProfile), never from
+  // anything typed or stored elsewhere -- that's the actual logged-in person, guaranteed.
+  const submitterLine = currentProfile ? `Submitted by: ${currentProfile.display_name} (${currentProfile.email})\n` : '';
+  const body = `${account ? `Order for ${account}\n` : ''}${submitterLine}Date: ${todayISO()}\n\nItems (${items.length}):\n${lines.join('\n')}\n\nTotal: ${fmtPrice(total)}\n`;
+  const manager = account ? resolveAccountManagerProfile(account) : null;
+  const toEmail = (manager && manager.email) || 'gnaguib@egytas.com';
   const mailto = `mailto:${toEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   window.location.href = mailto;
 }
