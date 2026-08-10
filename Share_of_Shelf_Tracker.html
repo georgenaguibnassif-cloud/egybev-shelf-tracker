@@ -3698,10 +3698,14 @@ marketReadingBtn.addEventListener('click', () => {
 createOrderBtn.addEventListener('click', async () => {
   const enteringOrder = viewMode !== 'order';
   if (enteringOrder) {
-    const blockMsg = getOrderBlockMessage(select.value);
-    if (blockMsg) { await showAlert(blockMsg); return; }
+    // Checked first, and independent of whether an account happens to be selected yet -- the
+    // Account Manager filter resets select.value to blank on every change, so a Rep who filters
+    // by someone else and clicks Create Order right away (before picking a specific account)
+    // must still see the filter nudge, not the generic "select an account" message.
     const repMismatchMsg = getRepFilterMismatchMessage(select.value);
     if (repMismatchMsg) { await showAlert(repMismatchMsg); return; }
+    const blockMsg = getOrderBlockMessage(select.value);
+    if (blockMsg) { await showAlert(blockMsg); return; }
   }
   closeSecondaryPanels();
   viewMode = enteringOrder ? 'order' : 'account';
