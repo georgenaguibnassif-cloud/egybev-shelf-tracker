@@ -1591,10 +1591,11 @@ const exportMenuRow = document.getElementById('exportMenuRow');
 let exportingPdfAccount = null;
 
 const PREFERRED_CATEGORY_ORDER = ['Beer', 'Wine', 'Sparkling', 'Skinos', 'Skinos (Outside Source)', 'Non-Alc'];
-// Categories that start OFF instead of the usual "on by default" -- currently just Spirits
-// (Kesrouan/Harry's/Black Rhino/Swan/Mosaic), added but deliberately kept out of sight until
-// asked for. Still shows up as a normal, checkable filter -- nothing here blocks turning it on.
-const DEFAULT_HIDDEN_CATEGORIES = new Set(['Spirits']);
+// Categories that start OFF instead of the usual "on by default" -- Spirits (Kesrouan/Harry's/
+// Black Rhino/Swan/Mosaic) added but deliberately kept out of sight until asked for, and Beer
+// kept unchecked by default per request. Still shows up as a normal, checkable filter -- nothing
+// here blocks turning it on.
+const DEFAULT_HIDDEN_CATEGORIES = new Set(['Spirits', 'Beer']);
 const activeCategories = new Set();
 const knownCategories = new Set();
 const activeSkus = new Set();
