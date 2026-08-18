@@ -1591,11 +1591,18 @@ const exportMenuRow = document.getElementById('exportMenuRow');
 let exportingPdfAccount = null;
 
 const PREFERRED_CATEGORY_ORDER = ['Beer', 'Wine', 'Sparkling', 'Skinos', 'Skinos (Outside Source)', 'Non-Alc'];
-// Categories that start OFF instead of the usual "on by default" -- Spirits (Kesrouan/Harry's/
-// Black Rhino/Swan/Mosaic) added but deliberately kept out of sight until asked for, and Beer
-// kept unchecked by default per request. Still shows up as a normal, checkable filter -- nothing
-// here blocks turning it on.
-const DEFAULT_HIDDEN_CATEGORIES = new Set(['Spirits', 'Beer']);
+// Categories that start OFF instead of the usual "on by default" -- currently just Spirits
+// (Kesrouan/Harry's/Black Rhino/Swan/Mosaic), added but deliberately kept out of sight until
+// asked for. Still shows up as a normal, checkable filter -- nothing here blocks turning it on.
+//
+// Beer was briefly added here too, but getFilteredAccountStats()/computeBlendedShareForActiveFilters()
+// compute the headline Share of Shelf % (per-account AND the Overview blended average) from
+// whichever categories are active -- Beer is ~100% Heineken-side, so defaulting it off silently
+// inflated every account's Share of Shelf and squeezed most of them into a narrow high band with
+// no on-screen indication the number was filtered at all. Reverted for that reason: this list is
+// safe for a category with a small blast radius (Spirits touches 5 accounts), not for one that
+// feeds a headline KPI shown everywhere.
+const DEFAULT_HIDDEN_CATEGORIES = new Set(['Spirits']);
 const activeCategories = new Set();
 const knownCategories = new Set();
 const activeSkus = new Set();
