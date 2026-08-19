@@ -227,6 +227,8 @@
   .brand-chart-label { flex: 0 0 260px; font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .brand-chart-bar { flex: 1 1 auto; height: 16px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-neutral-300); min-width: 80px; }
   .brand-chart-fill { height: 100%; background: var(--ours); }
+  .brand-chart-fill-hein { height: 100%; background: var(--heineken); }
+  .brand-chart-other-note { color: var(--muted); font-size: 0.82rem; margin-top: 6px; }
   @media (max-width: 700px) {
     .brand-chart-row { flex-wrap: wrap; }
     .brand-chart-label { flex: 1 1 100%; white-space: normal; }
@@ -607,6 +609,11 @@
   .mr-breakdown-seg-opportunity { height: 100%; background: var(--ours); }
   .mr-breakdown-seg-covered { height: 100%; background: var(--heineken); }
   .mr-breakdown-nums { flex: 0 0 auto; font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+  @media (max-width: 700px) {
+    .mr-breakdown-row { flex-wrap: wrap; gap: 2px 12px; }
+    .mr-breakdown-label { flex: 1 1 100%; white-space: normal; }
+    .mr-breakdown-bar { flex: 1 1 auto; }
+  }
 
   #lockScreen {
     position: fixed;
@@ -2557,32 +2564,56 @@ function renderAccountView() {
   });
 }
 
-// One entry per distinct EgyBev brand shown on the landing chart. `terms` are lowercase
-// substrings checked against a real per-account sku string — plain "contains" per term (an OR
-// across the list), never a strict prefix, specifically because real menu data spells the same
-// brand multiple ways: "Le Baron" also shows up as bare "Baron White/Rose/Signature", "Beausoleil"
-// also as split "Beau Soleil", "Chateau Byblos" also as bare "Byblos", "Jardin du Nil" also as
-// bare "Jardin Red/White". A single short core keyword ("baron", "soleil", "byblos", "jardin")
-// catches both forms in one substring test. Lavita needs two full alternatives instead of one
+// One entry per distinct brand shown on the landing chart, EgyBev (side: 'Ours') and ABC
+// (side: 'Heineken') together. `terms` are lowercase substrings checked against a real
+// per-account sku string — plain "contains" per term (an OR across the list), never a strict
+// prefix, because real menu data spells the same brand multiple ways: "Le Baron" also shows up as
+// bare "Baron White/Rose/Signature", "Beausoleil" also as split "Beau Soleil", "Chateau Byblos"
+// also as bare "Byblos", "Jardin du Nil" also as bare "Jardin Red/White", "Aida Valmont" also as
+// bare "Valmont". A single short core keyword ("baron", "soleil", "byblos", "jardin", "valmont")
+// catches every form in one substring test. Lavita needs two full alternatives instead of one
 // keyword because "La Vita" (space-split) and "Lavita" (one word) share no common substring a
-// keyword could exploit. Verified against every distinct real side='Ours' sku string in the
+// keyword could exploit. Verified against every distinct real sku string for its side in the
 // database before shipping (see the spot-check in the verify-before-pushing pass).
 //
-// Spirits (Kesrouan/Harry's/Black Rhino/Swan/Mosaic) are deliberately left off this list — they
+// Chateau de Granville is split into two entries by the item's own `category` field (via the
+// optional `category` match) -- the exact same sku text "Chateau de Granville" is used for both a
+// Sparkling listing and an unrelated Wine listing in the real data (16% vs 78% reach), so the sku
+// string alone can't tell them apart.
+//
+// Spirits (Kesrouan/Harry's/Black Rhino/Swan/Mosaic) are deliberately left off this list -- they
 // were just hidden from the app by request, so surfacing them prominently on the landing chart
-// would defeat that.
+// would defeat that. Belle Vie and Obelisk (ABC, ~0.3%/1 account each) are also left off the bar
+// list -- see computeAbcOtherPresence() below -- they're folded into a small note instead of
+// rendering as near-invisible bars.
 const LANDING_BRAND_DEFS = [
-  { name: 'Beausoleil', terms: ['soleil'] },
-  { name: 'Le Baron', terms: ['baron'] },
-  { name: 'Jardin du Nil', terms: ['jardin'] },
-  { name: 'Chateau Byblos', terms: ['byblos'] },
-  { name: 'Nala', terms: ['nala'] },
-  { name: 'Baila', terms: ['baila'] },
-  { name: 'Shahrazade', terms: ['shahrazade'] },
-  { name: 'XO', terms: ['xo'] },
-  { name: 'Aria', terms: ['aria'] },
-  { name: 'Lavita', terms: ['lavita', 'la vita'] },
-  { name: 'Skinos', terms: ['skinos'] },
+  { name: 'Beausoleil', side: 'Ours', terms: ['soleil'] },
+  { name: 'Le Baron', side: 'Ours', terms: ['baron'] },
+  { name: 'Jardin du Nil', side: 'Ours', terms: ['jardin'] },
+  { name: 'Chateau Byblos', side: 'Ours', terms: ['byblos'] },
+  { name: 'Nala', side: 'Ours', terms: ['nala'] },
+  { name: 'Baila', side: 'Ours', terms: ['baila'] },
+  { name: 'Shahrazade', side: 'Ours', terms: ['shahrazade'] },
+  { name: 'XO', side: 'Ours', terms: ['xo'] },
+  { name: 'Aria', side: 'Ours', terms: ['aria'] },
+  { name: 'Lavita', side: 'Ours', terms: ['lavita', 'la vita'] },
+  { name: 'Skinos', side: 'Ours', terms: ['skinos'] },
+  { name: 'Aida Valmont', side: 'Heineken', terms: ['valmont'] },
+  { name: 'Cape Bay', side: 'Heineken', terms: ['cape bay'] },
+  { name: 'Castello di Trevi', side: 'Heineken', terms: ['castello'] },
+  { name: 'Grand Marquis', side: 'Heineken', terms: ['marquis'] },
+  { name: 'Omar Khayyam', side: 'Heineken', terms: ['khayyam'] },
+  { name: '365', side: 'Heineken', terms: ['365'] },
+  { name: 'Gianaclis', side: 'Heineken', terms: ['gianaclis'] },
+  { name: 'Chateau de Granville (Sparkling)', side: 'Heineken', terms: ['granville'], category: 'Sparkling' },
+  { name: 'Chateau de Granville (Wine)', side: 'Heineken', terms: ['granville'], category: 'Wine' },
+];
+
+// ABC brands present in only ~1 account each -- too small to render as their own bar, so they're
+// surfaced as a note under the chart instead. Same tolerant substring matching as LANDING_BRAND_DEFS.
+const LANDING_ABC_OTHER_DEFS = [
+  { name: 'Belle Vie', terms: ['belle vie'] },
+  { name: 'Obelisk', terms: ['obelisk'] },
 ];
 
 function landingBrandMatchesSku(def, sku) {
@@ -2599,18 +2630,41 @@ function computeBrandPenetration(accounts) {
     let count = 0;
     accounts.forEach(acct => {
       const items = DATA.accounts[acct] || [];
-      if (items.some(i => i.side === 'Ours' && landingBrandMatchesSku(def, i.sku))) count++;
+      if (items.some(i => i.side === def.side && landingBrandMatchesSku(def, i.sku) && (!def.category || i.category === def.category))) count++;
     });
     const pct = accounts.length ? (count / accounts.length) * 100 : 0;
-    return { name: def.name, count, pct };
+    return { name: def.name, side: def.side, count, pct };
   }).sort((a, b) => b.pct - a.pct);
+}
+
+function computeAbcOtherPresence(accounts) {
+  return LANDING_ABC_OTHER_DEFS.map(def => {
+    let count = 0;
+    accounts.forEach(acct => {
+      const items = DATA.accounts[acct] || [];
+      if (items.some(i => i.side === 'Heineken' && landingBrandMatchesSku(def, i.sku))) count++;
+    });
+    return { name: def.name, count };
+  }).filter(d => d.count > 0);
+}
+
+function abcOtherNoteHtml(others) {
+  if (!others.length) return '';
+  const allSame = others.every(o => o.count === others[0].count);
+  const text = allSame
+    ? `Also present in ${others[0].count} account${others[0].count === 1 ? '' : 's'} each: ${others.map(o => o.name).join(', ')}.`
+    : `Also present: ${others.map(o => `${o.name} (${o.count} account${o.count === 1 ? '' : 's'})`).join(', ')}.`;
+  return `<div class="brand-chart-other-note">${escapeHtml(text)}</div>`;
 }
 
 // Purely a display grouping for the landing chart -- computeBrandPenetration's math (count/pct)
 // is untouched; this only controls which section a brand's already-computed row renders under.
+// Within a section, brands from both sides are interleaved and sorted purely by percentage (see
+// renderBrandChartHtml) so the chart shows who's actually ahead in each category at a glance,
+// rather than grouping EgyBev's bars separately from ABC's.
 const LANDING_BRAND_GROUPS = [
-  { label: 'Sparkling Wine', names: ['Le Baron', 'Aria', 'Lavita'] },
-  { label: 'Wine', names: ['Beausoleil', 'Jardin du Nil', 'Nala', 'Baila', 'Shahrazade', 'Chateau Byblos', 'XO'] },
+  { label: 'Sparkling', names: ['Le Baron', 'Aria', 'Lavita', 'Aida Valmont', 'Chateau de Granville (Sparkling)', 'Gianaclis'] },
+  { label: 'Wine', names: ['Beausoleil', 'Jardin du Nil', 'Nala', 'Baila', 'Shahrazade', 'Chateau Byblos', 'XO', 'Cape Bay', 'Chateau de Granville (Wine)', 'Omar Khayyam', 'Grand Marquis', 'Castello di Trevi', '365'] },
   { label: 'Skinos', names: ['Skinos'] },
 ];
 
@@ -2618,7 +2672,7 @@ function brandChartRowsHtml(brands, accounts) {
   return brands.map(b => `
     <div class="brand-chart-row">
       <div class="brand-chart-label">${escapeHtml(b.name)} — ${b.pct.toFixed(1)}% (${b.count} of ${accounts.length} accounts)</div>
-      <div class="brand-chart-bar"><div class="brand-chart-fill" style="width:${b.pct}%"></div></div>
+      <div class="brand-chart-bar"><div class="brand-chart-fill${b.side === 'Heineken' ? ' brand-chart-fill-hein' : ''}" style="width:${b.pct}%"></div></div>
     </div>
   `).join('');
 }
@@ -2627,6 +2681,7 @@ function renderBrandChartHtml(accounts) {
   const brands = computeBrandPenetration(accounts);
   const topBrand = brands[0];
   const byName = new Map(brands.map(b => [b.name, b]));
+  const others = computeAbcOtherPresence(accounts);
 
   const sectionsHtml = LANDING_BRAND_GROUPS.map(g => {
     const groupBrands = g.names.map(n => byName.get(n)).filter(Boolean).sort((a, b) => b.pct - a.pct);
@@ -2645,7 +2700,12 @@ function renderBrandChartHtml(accounts) {
         <div class="activity-stat"><div class="activity-stat-num">${brands.length}</div><div class="activity-stat-label">Brands Tracked</div></div>
         <div class="activity-stat"><div class="activity-stat-num" style="font-size:1.4rem;">${topBrand ? escapeHtml(topBrand.name) : '—'}</div><div class="activity-stat-label">Top Brand by Reach</div></div>
       </div>
+      <div class="legend" style="margin-top:0; margin-bottom:14px;">
+        <span><span class="dot ours"></span>${OURS_LABEL}</span>
+        <span><span class="dot heineken"></span>${HEINEKEN_LABEL}</span>
+      </div>
       ${sectionsHtml}
+      ${abcOtherNoteHtml(others)}
     </div>
   `;
 }
