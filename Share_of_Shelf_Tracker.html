@@ -2738,10 +2738,12 @@ function renderSkuLookupHtml(accounts, skuFilterTexts) {
 // structural facts about the current territory scope (driven purely by accountsForTypeFilter() --
 // Region/Type/Account Manager), not a browsing view, so they deliberately bypass
 // activeCategories/the SKU-filter picker so they don't shift depending on incidental display
-// toggles. The one exception is the hero percentage itself, which intentionally reuses
-// getFilteredAccountStats() so it reads identically to the Share of Shelf figure already shown
-// on each account's own page.
+// toggles.
 
+// Used by the Overview page's own blended-share stat card and the account-page headline
+// (getFilteredAccountStats) -- a full-catalog "Ours vs Heineken across everything" number.
+// NOT used by the landing-screen hero below: that one is deliberately scoped to Wine + Sparkling
+// only, matching the two comparison bars shown under it (see computeShareOfShelfHero).
 function computeBlendedShareStatsForActiveFilters() {
   let ours = 0, heineken = 0;
   accountsForTypeFilter().forEach(name => {
@@ -2765,6 +2767,20 @@ function computeCategoryShareBreakdown(accounts) {
     });
     return { category, ours, heineken, total: ours + heineken };
   });
+}
+
+// The landing-screen hero % is the Wine+Sparkling totals rolled up into one number -- the same
+// scope as the two bars rendered beneath it, so the headline is always consistent with its own
+// breakdown. Deliberately NOT a full-catalog number: EgyBev has no Beer product at all (Beer is
+// 100% Heineken-side), so folding Beer's ~2,000 Heineken-only listings into the denominator would
+// dilute the percentage with a category EgyBev structurally can't compete in, making "Share of
+// Shelf" read lower than EgyBev's actual position in the categories it's actually selling into --
+// and would silently disagree with the Wine/Sparkling bars shown directly under it.
+function computeShareOfShelfHero(cats) {
+  const ours = cats.reduce((sum, c) => sum + c.ours, 0);
+  const heineken = cats.reduce((sum, c) => sum + c.heineken, 0);
+  const total = ours + heineken;
+  return { ours, heineken, pct: total > 0 ? (ours / total) * 100 : 0 };
 }
 
 function computeZeroEgyBevAccounts(accounts) {
@@ -2826,9 +2842,9 @@ function computeTerritoryComposition(accounts) {
 }
 
 function renderShareOfShelfWidgetHtml(accounts) {
-  const stats = computeBlendedShareStatsForActiveFilters();
-  const sharePct = stats.pct.toFixed(1);
   const cats = computeCategoryShareBreakdown(accounts);
+  const stats = computeShareOfShelfHero(cats);
+  const sharePct = stats.pct.toFixed(1);
 
   const catRows = cats.map(c => {
     if (!c.total) {
@@ -2860,7 +2876,7 @@ function renderShareOfShelfWidgetHtml(accounts) {
       <div class="share-row" style="margin-top:12px;">
         <div>
           <div class="share-number" style="color:var(--ours);">${sharePct}%</div>
-          <div class="share-meta">${OURS_LABEL} of total listings</div>
+          <div class="share-meta">${OURS_LABEL} of Wine + Sparkling listings</div>
         </div>
         <div class="bar-track"><div class="bar-ours" style="width:${stats.pct}%"></div></div>
       </div>
