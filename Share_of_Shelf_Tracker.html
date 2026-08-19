@@ -1659,18 +1659,19 @@ const exportMenuRow = document.getElementById('exportMenuRow');
 let exportingPdfAccount = null;
 
 const PREFERRED_CATEGORY_ORDER = ['Beer', 'Wine', 'Sparkling', 'Skinos', 'Skinos (Outside Source)', 'Non-Alc'];
-// Categories that start OFF instead of the usual "on by default" -- currently just Spirits
-// (Kesrouan/Harry's/Black Rhino/Swan/Mosaic), added but deliberately kept out of sight until
-// asked for. Still shows up as a normal, checkable filter -- nothing here blocks turning it on.
+// Categories that start OFF instead of the usual "on by default" -- Spirits (Kesrouan/Harry's/
+// Black Rhino/Swan/Mosaic) and now Beer, kept out of the on-screen item list until asked for.
+// Still shows up as a normal, checkable filter -- nothing here blocks turning it on.
 //
-// Beer was briefly added here too, but getFilteredAccountStats()/computeBlendedShareForActiveFilters()
-// compute the headline Share of Shelf % (per-account AND the Overview blended average) from
-// whichever categories are active -- Beer is ~100% Heineken-side, so defaulting it off silently
-// inflated every account's Share of Shelf and squeezed most of them into a narrow high band with
-// no on-screen indication the number was filtered at all. Reverted for that reason: this list is
-// safe for a category with a small blast radius (Spirits touches 5 accounts), not for one that
-// feeds a headline KPI shown everywhere.
-const DEFAULT_HIDDEN_CATEGORIES = new Set(['Spirits']);
+// Beer was briefly added here once before and reverted, because at the time getFilteredAccountStats()/
+// getFilteredMarkupStats() computed the headline Share of Shelf % (per-account, Overview blended
+// average, and the landing-screen hero) from whichever categories were active -- so defaulting
+// Beer off silently inflated every account's Share of Shelf with no on-screen indication the
+// number was filtered at all. That's now fixed at the root: those two functions no longer consult
+// activeCategories (see statsScopedItems() below), so no category -- default-hidden or manually
+// unchecked, Beer or anything added later -- can ever again change the headline KPI just because
+// it's hidden from the item list. Safe to default Beer off here now.
+const DEFAULT_HIDDEN_CATEGORIES = new Set(['Spirits', 'Beer']);
 const activeCategories = new Set();
 const knownCategories = new Set();
 const activeSkus = new Set();
@@ -2998,9 +2999,20 @@ function getWeeklyActivitySummary() {
   return { accountsVisited: accountsVisited.size, notesAdded, menusUpdated };
 }
 
+// Deliberately does NOT use filterItems()/activeCategories -- see the comment on
+// DEFAULT_HIDDEN_CATEGORIES. The category checkboxes only control what's visible in the item
+// list; Share of Shelf and Avg Markup are headline business numbers and must always reflect the
+// account's true full catalog. The "Wine By Glass" special view is the one exception, since it's
+// an explicit user action with its own visible "Filtered: Wine By Glass" indicator on Overview,
+// not a silent default.
+function statsScopedItems(items) {
+  if (byGlassFilterEl.checked) return items.filter(i => i.category === 'Wine' && i.byGlass);
+  return items;
+}
+
 function getFilteredAccountStats(name) {
   const items = DATA.accounts[name] || [];
-  const filtered = filterItems(items, []);
+  const filtered = statsScopedItems(items);
   const ours = filtered.filter(i => i.side === 'Ours').length;
   const heineken = filtered.filter(i => i.side === 'Heineken').length;
   const share = (ours + heineken) > 0 ? ours / (ours + heineken) : 0;
@@ -3008,7 +3020,7 @@ function getFilteredAccountStats(name) {
 }
 
 function getFilteredMarkupStats(name) {
-  const items = filterItems(DATA.accounts[name] || [], []);
+  const items = statsScopedItems(DATA.accounts[name] || []);
   const oursMarkups = [];
   const heinMarkups = [];
   items.forEach(i => {
@@ -3021,17 +3033,14 @@ function getFilteredMarkupStats(name) {
   return { markupOurs: avg(oursMarkups), markupHeineken: avg(heinMarkups) };
 }
 
+// Only mentions filters that actually change the numbers in the table below. The category
+// checkboxes don't (Share of Shelf/Avg Markup are always full-catalog -- see statsScopedItems()),
+// so they're deliberately left out here; "Wine By Glass" does still narrow the stats, so it stays.
 function overviewFilterSummary() {
   const parts = [];
   if (accountTypeFilterEl.value) parts.push(`Type: ${accountTypeFilterEl.value}`);
   if (byGlassFilterEl.checked) {
     parts.push('Wine By Glass');
-  } else {
-    const allCats = getAllCategories();
-    if (activeCategories.size < allCats.length) {
-      const chosen = allCats.filter(c => activeCategories.has(c));
-      parts.push(chosen.length ? chosen.join(', ') : 'no categories');
-    }
   }
   return parts.length ? `Filtered: ${parts.join(' · ')}` : '';
 }
