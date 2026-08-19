@@ -2567,15 +2567,36 @@ function computeBrandPenetration(accounts) {
   }).sort((a, b) => b.pct - a.pct);
 }
 
-function renderBrandChartHtml(accounts) {
-  const brands = computeBrandPenetration(accounts);
-  const topBrand = brands[0];
-  const rows = brands.map(b => `
+// Purely a display grouping for the landing chart -- computeBrandPenetration's math (count/pct)
+// is untouched; this only controls which section a brand's already-computed row renders under.
+const LANDING_BRAND_GROUPS = [
+  { label: 'Sparkling Wine', names: ['Le Baron', 'Aria', 'Lavita'] },
+  { label: 'Wine', names: ['Beausoleil', 'Jardin du Nil', 'Nala', 'Baila', 'Shahrazade', 'Chateau Byblos', 'XO'] },
+  { label: 'Skinos', names: ['Skinos'] },
+];
+
+function brandChartRowsHtml(brands, accounts) {
+  return brands.map(b => `
     <div class="brand-chart-row">
       <div class="brand-chart-label">${escapeHtml(b.name)} — ${b.pct.toFixed(1)}% (${b.count} of ${accounts.length} accounts)</div>
       <div class="brand-chart-bar"><div class="brand-chart-fill" style="width:${b.pct}%"></div></div>
     </div>
   `).join('');
+}
+
+function renderBrandChartHtml(accounts) {
+  const brands = computeBrandPenetration(accounts);
+  const topBrand = brands[0];
+  const byName = new Map(brands.map(b => [b.name, b]));
+
+  const sectionsHtml = LANDING_BRAND_GROUPS.map(g => {
+    const groupBrands = g.names.map(n => byName.get(n)).filter(Boolean).sort((a, b) => b.pct - a.pct);
+    if (!groupBrands.length) return '';
+    return `
+      <div class="sku-filter-group-title">${escapeHtml(g.label)}</div>
+      ${brandChartRowsHtml(groupBrands, accounts)}
+    `;
+  }).join('');
 
   return `
     <div class="card">
@@ -2585,7 +2606,7 @@ function renderBrandChartHtml(accounts) {
         <div class="activity-stat"><div class="activity-stat-num">${brands.length}</div><div class="activity-stat-label">Brands Tracked</div></div>
         <div class="activity-stat"><div class="activity-stat-num" style="font-size:1.4rem;">${topBrand ? escapeHtml(topBrand.name) : '—'}</div><div class="activity-stat-label">Top Brand by Reach</div></div>
       </div>
-      ${rows}
+      ${sectionsHtml}
     </div>
   `;
 }
