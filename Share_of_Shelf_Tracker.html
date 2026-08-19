@@ -66,6 +66,12 @@
     --text: var(--color-text);
     --muted: var(--color-neutral-600);
     --border: var(--color-divider);
+
+    /* Amber warning tone, deliberately distinct from --ours (the brand-red accent used for
+       EgyBev everywhere else) so a flagged/at-risk state never reads as "EgyBev-branded". */
+    --warn: #92400e;
+    --warn-bg: #fdf1dd;
+    --warn-border: #e2b45f;
   }
   * { box-sizing: border-box; }
   body {
@@ -251,6 +257,38 @@
     .carry-row { gap: 4px 10px; }
     .carry-variants { flex: 1 1 100%; order: 3; }
   }
+
+  /* ---- Landing screen: territory health widgets (Share of Shelf, zero-EgyBev, missing
+     prices, territory composition) ---- */
+  .territory-section-title { font-size: 1rem; margin: 0 0 4px 0; color: var(--text); }
+  .share-cat-row { margin-top: 16px; }
+  .share-cat-row:first-of-type { margin-top: 20px; }
+  .share-cat-name { font-size: 0.82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px; }
+  .share-cat-bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+  .share-cat-label { flex: 0 0 200px; font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .share-cat-bar { flex: 1 1 auto; height: 14px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-neutral-200); min-width: 80px; }
+  .share-cat-fill-ours { height: 100%; background: var(--ours); }
+  .share-cat-fill-hein { height: 100%; background: var(--heineken); }
+  @media (max-width: 700px) {
+    .share-cat-bar-row { flex-wrap: wrap; }
+    .share-cat-label { flex: 1 1 100%; white-space: normal; }
+    .share-cat-bar { flex: 1 1 100%; }
+  }
+
+  .zero-ours-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .zero-ours-item {
+    background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border);
+    border-radius: var(--radius-sm); padding: 4px 10px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  }
+  .zero-ours-item:hover { text-decoration: underline; }
+  .clean-msg { color: var(--muted); padding: 8px 0; }
+
+  .missing-price-nums { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 14px; }
+  .missing-price-num-block { display: flex; flex-direction: column; }
+  .missing-price-num { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 1.6rem; }
+  .missing-price-num-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 2px; }
+
+  .mr-breakdown-seg-neutral { height: 100%; background: var(--color-neutral-500); }
   .empty-msg { color: var(--muted); font-style: italic; padding: 8px 0; }
   .placeholder { color: var(--muted); text-align: center; padding: 40px 0; }
 
@@ -2694,14 +2732,218 @@ function renderSkuLookupHtml(accounts, skuFilterTexts) {
   `;
 }
 
+// ---- Territory health widgets (3-6): Share of Shelf hero + category bars, zero-EgyBev flags,
+// missing prices, and territory composition. Like the Brand Penetration chart, these are
+// structural facts about the current territory scope (driven purely by accountsForTypeFilter() --
+// Region/Type/Account Manager), not a browsing view, so they deliberately bypass
+// activeCategories/the SKU-filter picker so they don't shift depending on incidental display
+// toggles. The one exception is the hero percentage itself, which intentionally reuses
+// getFilteredAccountStats() so it reads identically to the Share of Shelf figure already shown
+// on each account's own page.
+
+function computeBlendedShareStatsForActiveFilters() {
+  let ours = 0, heineken = 0;
+  accountsForTypeFilter().forEach(name => {
+    const s = getFilteredAccountStats(name);
+    ours += s.ours;
+    heineken += s.heineken;
+  });
+  const total = ours + heineken;
+  return { ours, heineken, pct: total > 0 ? (ours / total) * 100 : 0 };
+}
+
+function computeCategoryShareBreakdown(accounts) {
+  return ['Wine', 'Sparkling'].map(category => {
+    let ours = 0, heineken = 0;
+    accounts.forEach(acct => {
+      (DATA.accounts[acct] || []).forEach(i => {
+        if (i.category !== category) return;
+        if (i.side === 'Ours') ours++;
+        else if (i.side === 'Heineken') heineken++;
+      });
+    });
+    return { category, ours, heineken, total: ours + heineken };
+  });
+}
+
+function computeZeroEgyBevAccounts(accounts) {
+  return accounts
+    .filter(acct => !(DATA.accounts[acct] || []).some(i => i.side === 'Ours'))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+// "Missing" = price null OR 0 (a real price is never actually 0 in this data, so 0 is always a
+// placeholder), applied to whichever price field is the relevant one for the item: bottle price
+// normally, glass price for a by-glass-only item -- otherwise a legitimate by-glass-only item
+// with no bottle price at all would be wrongly flagged just for not having one.
+function hasUsablePrice(item) {
+  if (item.byGlass) return item.glassPrice != null && item.glassPrice !== 0;
+  return item.price != null && item.price !== 0;
+}
+
+function computeMissingPricesBreakdown(accounts) {
+  let totalRows = 0;
+  const affectedAccounts = new Set();
+  const byRegion = new Map();
+  accounts.forEach(acct => {
+    let rowsHere = 0;
+    (DATA.accounts[acct] || []).forEach(i => {
+      if (i.side !== 'Ours' || hasUsablePrice(i)) return;
+      totalRows++;
+      rowsHere++;
+    });
+    if (rowsHere > 0) {
+      affectedAccounts.add(acct);
+      const region = (ACCOUNT_INFO[acct] && ACCOUNT_INFO[acct].region) || 'Unknown';
+      if (!byRegion.has(region)) byRegion.set(region, { rows: 0, accounts: new Set() });
+      const r = byRegion.get(region);
+      r.rows += rowsHere;
+      r.accounts.add(acct);
+    }
+  });
+  const regions = Array.from(byRegion.entries())
+    .map(([name, r]) => ({ name, rows: r.rows, accounts: r.accounts.size }))
+    .sort((a, b) => b.rows - a.rows);
+  return { totalRows, accountsAffected: affectedAccounts.size, regions };
+}
+
+function computeTerritoryComposition(accounts) {
+  const byRegion = new Map();
+  const byType = new Map();
+  accounts.forEach(acct => {
+    const info = ACCOUNT_INFO[acct];
+    const region = (info && info.region) || 'Unknown';
+    const type = (info && info.type) || 'Unknown';
+    byRegion.set(region, (byRegion.get(region) || 0) + 1);
+    byType.set(type, (byType.get(type) || 0) + 1);
+  });
+  const toSorted = m => Array.from(m.entries())
+    .filter(([, count]) => count > 0)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+  return { byRegion: toSorted(byRegion), byType: toSorted(byType) };
+}
+
+function renderShareOfShelfWidgetHtml(accounts) {
+  const stats = computeBlendedShareStatsForActiveFilters();
+  const sharePct = stats.pct.toFixed(1);
+  const cats = computeCategoryShareBreakdown(accounts);
+
+  const catRows = cats.map(c => {
+    if (!c.total) {
+      return `
+        <div class="share-cat-row">
+          <div class="share-cat-name">${escapeHtml(c.category)}</div>
+          <div class="empty-msg">No ${escapeHtml(c.category)} listings in this scope.</div>
+        </div>`;
+    }
+    const oursPct = (c.ours / c.total) * 100;
+    const heinPct = (c.heineken / c.total) * 100;
+    return `
+      <div class="share-cat-row">
+        <div class="share-cat-name">${escapeHtml(c.category)}</div>
+        <div class="share-cat-bar-row">
+          <div class="share-cat-label">${OURS_LABEL} — ${c.ours} (${oursPct.toFixed(1)}%)</div>
+          <div class="share-cat-bar"><div class="share-cat-fill-ours" style="width:${oursPct}%"></div></div>
+        </div>
+        <div class="share-cat-bar-row">
+          <div class="share-cat-label">${HEINEKEN_LABEL} — ${c.heineken} (${heinPct.toFixed(1)}%)</div>
+          <div class="share-cat-bar"><div class="share-cat-fill-hein" style="width:${heinPct}%"></div></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <h2 class="territory-section-title">Share of Shelf</h2>
+      <div class="share-row" style="margin-top:12px;">
+        <div>
+          <div class="share-number" style="color:var(--ours);">${sharePct}%</div>
+          <div class="share-meta">${OURS_LABEL} of total listings</div>
+        </div>
+        <div class="bar-track"><div class="bar-ours" style="width:${stats.pct}%"></div></div>
+      </div>
+      <div class="share-meta" style="margin-top:6px;">${stats.ours} ${OURS_LABEL} &middot; ${stats.heineken} ${HEINEKEN_LABEL}</div>
+      ${catRows}
+    </div>
+  `;
+}
+
+function renderZeroEgyBevWidgetHtml(accounts) {
+  const zero = computeZeroEgyBevAccounts(accounts);
+  const body = zero.length
+    ? `<div class="zero-ours-list">${zero.map(acct => `<span class="zero-ours-item jump-to-account" data-account="${escapeHtml(acct)}">${escapeHtml(acct)}</span>`).join('')}</div>`
+    : `<div class="clean-msg">No accounts with zero presence — good.</div>`;
+  return `
+    <div class="card">
+      <h2 class="territory-section-title">Zero-EgyBev Accounts (${zero.length})</h2>
+      ${body}
+    </div>
+  `;
+}
+
+function renderMissingPricesWidgetHtml(accounts) {
+  const m = computeMissingPricesBreakdown(accounts);
+  if (!m.totalRows) {
+    return `
+      <div class="card">
+        <h2 class="territory-section-title">Missing Prices</h2>
+        <div class="clean-msg">No ${OURS_LABEL} items missing a price — good.</div>
+      </div>
+    `;
+  }
+  const maxRows = Math.max(...m.regions.map(r => r.rows));
+  const regionRows = m.regions.map(r => `
+    <div class="mr-breakdown-row">
+      <div class="mr-breakdown-label" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</div>
+      <div class="mr-breakdown-bar"><div class="mr-breakdown-seg-neutral" style="width:${maxRows ? (r.rows / maxRows) * 100 : 0}%"></div></div>
+      <div class="mr-breakdown-nums">${r.rows} row${r.rows === 1 ? '' : 's'} · ${r.accounts} account${r.accounts === 1 ? '' : 's'}</div>
+    </div>
+  `).join('');
+  return `
+    <div class="card">
+      <h2 class="territory-section-title">Missing Prices</h2>
+      <div class="missing-price-nums" style="margin-top:12px;">
+        <div class="missing-price-num-block"><div class="missing-price-num">${m.totalRows}</div><div class="missing-price-num-label">Rows Missing Price</div></div>
+        <div class="missing-price-num-block"><div class="missing-price-num">${m.accountsAffected}</div><div class="missing-price-num-label">Accounts Affected</div></div>
+      </div>
+      ${regionRows}
+    </div>
+  `;
+}
+
+function renderTerritoryCompositionWidgetHtml(accounts) {
+  const comp = computeTerritoryComposition(accounts);
+  const maxRegion = comp.byRegion.length ? Math.max(...comp.byRegion.map(r => r.count)) : 0;
+  const maxType = comp.byType.length ? Math.max(...comp.byType.map(r => r.count)) : 0;
+  const rowHtml = (r, max) => `
+    <div class="mr-breakdown-row">
+      <div class="mr-breakdown-label" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</div>
+      <div class="mr-breakdown-bar"><div class="mr-breakdown-seg-neutral" style="width:${max ? (r.count / max) * 100 : 0}%"></div></div>
+      <div class="mr-breakdown-nums">${r.count}</div>
+    </div>
+  `;
+  return `
+    <div class="card mr-breakdown-section">
+      <h2 class="territory-section-title">Territory Composition</h2>
+      ${comp.byRegion.length ? `<div class="mr-breakdown-title">By Region</div>${comp.byRegion.map(r => rowHtml(r, maxRegion)).join('')}` : ''}
+      ${comp.byType.length ? `<div class="mr-breakdown-title">By Type</div>${comp.byType.map(r => rowHtml(r, maxType)).join('')}` : ''}
+    </div>
+  `;
+}
+
 function renderAllAccountsComparison() {
   const skuFilterTexts = orderedActiveSkuNames();
   const accounts = accountsForTypeFilter().sort((a, b) => a.localeCompare(b));
 
   const chartHtml = renderBrandChartHtml(accounts);
   const lookupHtml = skuFilterTexts.length ? renderSkuLookupHtml(accounts, skuFilterTexts) : '';
+  const shareHtml = renderShareOfShelfWidgetHtml(accounts);
+  const zeroHtml = renderZeroEgyBevWidgetHtml(accounts);
+  const missingPricesHtml = renderMissingPricesWidgetHtml(accounts);
+  const compositionHtml = renderTerritoryCompositionWidgetHtml(accounts);
 
-  content.innerHTML = chartHtml + lookupHtml;
+  content.innerHTML = chartHtml + lookupHtml + shareHtml + zeroHtml + missingPricesHtml + compositionHtml;
 
   content.querySelectorAll('.jump-to-account').forEach(cell => {
     cell.addEventListener('click', () => {
@@ -2721,13 +2963,7 @@ function computeLastVisit(account) {
 }
 
 function computeBlendedShareForActiveFilters() {
-  let ours = 0, total = 0;
-  accountsForTypeFilter().forEach(name => {
-    const s = getFilteredAccountStats(name);
-    ours += s.ours;
-    total += s.ours + s.heineken;
-  });
-  return total > 0 ? (ours / total) * 100 : 0;
+  return computeBlendedShareStatsForActiveFilters().pct;
 }
 
 function startOfThisWeek() {
