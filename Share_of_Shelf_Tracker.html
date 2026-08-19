@@ -215,12 +215,42 @@
   .glass-note { color: var(--muted); font-size: 0.76rem; }
   .markup-note { color: var(--muted); font-size: 0.76rem; }
   .no-price { color: var(--muted); font-style: italic; font-size: 0.85rem; }
-  .all-accounts-table td:first-child { font-weight: 600; white-space: nowrap; }
-  .all-accounts-table td.jump-to-account { cursor: pointer; }
-  .all-accounts-table td.jump-to-account:hover { text-decoration: underline; color: var(--ours); }
-  .all-accounts-table tr.row-not-listed td:first-child { font-weight: 400; color: var(--muted); }
-  .not-listed { color: var(--muted); font-style: italic; }
-  .all-acct-match { display: flex; align-items: center; gap: 8px; padding: 3px 0; flex-wrap: wrap; }
+
+  /* ---- Landing screen: brand penetration chart + SKU lookup ---- */
+  .brand-chart-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .brand-chart-label { flex: 0 0 260px; font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brand-chart-bar { flex: 1 1 auto; height: 16px; border-radius: var(--radius-sm); overflow: hidden; background: var(--color-neutral-300); min-width: 80px; }
+  .brand-chart-fill { height: 100%; background: var(--ours); }
+  @media (max-width: 700px) {
+    .brand-chart-row { flex-wrap: wrap; }
+    .brand-chart-label { flex: 1 1 100%; white-space: normal; }
+    .brand-chart-bar { flex: 1 1 100%; }
+  }
+
+  .sku-lookup-header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 4px 0 10px; }
+  .sku-lookup-stat { font-family: var(--font-heading); font-weight: var(--font-heading-weight); font-size: 1.3rem; }
+  @media (max-width: 700px) {
+    .sku-lookup-stat { font-size: 1.05rem; }
+  }
+  .sku-lookup-section-title { font-size: 0.82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 18px 0 8px; }
+  .sku-lookup-section-title:first-of-type { margin-top: 0; }
+
+  .carry-list { display: flex; flex-direction: column; }
+  .carry-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .carry-check { color: var(--ours); font-weight: 700; flex: 0 0 auto; }
+  .carry-account { font-weight: 600; flex: 1 1 200px; min-width: 120px; cursor: pointer; }
+  .carry-account:hover { text-decoration: underline; color: var(--ours); }
+  .carry-variants { color: var(--muted); font-size: 0.82rem; flex: 2 1 200px; }
+  .carry-price { font-variant-numeric: tabular-nums; white-space: nowrap; flex: 0 0 auto; font-weight: 600; }
+
+  .not-carry-list { display: flex; flex-wrap: wrap; gap: 7px 18px; }
+  .not-carry-item { color: var(--muted); font-size: 0.85rem; cursor: pointer; }
+  .not-carry-item:hover { text-decoration: underline; }
+
+  @media (max-width: 700px) {
+    .carry-row { gap: 4px 10px; }
+    .carry-variants { flex: 1 1 100%; order: 3; }
+  }
   .empty-msg { color: var(--muted); font-style: italic; padding: 8px 0; }
   .placeholder { color: var(--muted); text-align: center; padding: 40px 0; }
 
@@ -2488,54 +2518,169 @@ function renderAccountView() {
   });
 }
 
-function renderAllAccountsComparison() {
-  const skuFilterTexts = orderedActiveSkuNames();
-  const typeFilter = accountTypeFilterEl.value;
-  const typeLabel = typeFilter ? escapeHtml(typeFilter) : 'All Types';
-  const accounts = accountsForTypeFilter().sort((a, b) => a.localeCompare(b));
+// One entry per distinct EgyBev brand shown on the landing chart. `terms` are lowercase
+// substrings checked against a real per-account sku string — plain "contains" per term (an OR
+// across the list), never a strict prefix, specifically because real menu data spells the same
+// brand multiple ways: "Le Baron" also shows up as bare "Baron White/Rose/Signature", "Beausoleil"
+// also as split "Beau Soleil", "Chateau Byblos" also as bare "Byblos", "Jardin du Nil" also as
+// bare "Jardin Red/White". A single short core keyword ("baron", "soleil", "byblos", "jardin")
+// catches both forms in one substring test. Lavita needs two full alternatives instead of one
+// keyword because "La Vita" (space-split) and "Lavita" (one word) share no common substring a
+// keyword could exploit. Verified against every distinct real side='Ours' sku string in the
+// database before shipping (see the spot-check in the verify-before-pushing pass).
+//
+// Spirits (Kesrouan/Harry's/Black Rhino/Swan/Mosaic) are deliberately left off this list — they
+// were just hidden from the app by request, so surfacing them prominently on the landing chart
+// would defeat that.
+const LANDING_BRAND_DEFS = [
+  { name: 'Beausoleil', terms: ['soleil'] },
+  { name: 'Le Baron', terms: ['baron'] },
+  { name: 'Jardin du Nil', terms: ['jardin'] },
+  { name: 'Chateau Byblos', terms: ['byblos'] },
+  { name: 'Nala', terms: ['nala'] },
+  { name: 'Baila', terms: ['baila'] },
+  { name: 'Shahrazade', terms: ['shahrazade'] },
+  { name: 'XO', terms: ['xo'] },
+  { name: 'Aria', terms: ['aria'] },
+  { name: 'Lavita', terms: ['lavita', 'la vita'] },
+  { name: 'Skinos', terms: ['skinos'] },
+];
 
-  const rowsHtml = accounts.map(acct => {
-    const items = DATA.accounts[acct] || [];
-    const matches = filterItems(items, skuFilterTexts);
-    const statusHtml = matches.length === 0
-      ? '<span class="not-listed">Not Listed</span>'
-      : matches.map(m => {
-          const sideClass = m.side === 'Ours' ? 'ours' : (m.side === 'Heineken' ? 'heineken' : '');
-          const isSkinos = m.category === 'Skinos';
-          const sideText = sideLabel(m.side);
-          const glass = m.byGlass && m.glassPrice ? ` <span class="glass-note">(glass: ${fmtPrice(m.glassPrice)})</span>` : '';
-          const priceText = m.price == null ? '<span class="no-price">No price set</span>' : fmtPrice(m.price);
-          // Skinos already spells out its source in categoryDisplayLabel (e.g. "Skinos (Outside
-          // Source)"), so the trailing side suffix would just repeat it — skip it for Skinos only.
-          return `<div class="all-acct-match">
-            <span class="dot ${sideClass}"></span>
-            <span>${escapeHtml(m.sku)} <span class="cat-tag">${escapeHtml(categoryDisplayLabel(m))}${m.subtype ? ' · ' + escapeHtml(m.subtype) : ''}${isSkinos ? '' : ' · ' + escapeHtml(sideText)}</span></span>
-            <strong>${priceText}</strong>${glass}
-          </div>`;
-        }).join('');
-    return `<tr class="${matches.length === 0 ? 'row-not-listed' : ''}">
-      <td class="jump-to-account" data-account="${escapeHtml(acct)}">${escapeHtml(acct)}</td>
-      <td>${statusHtml}</td>
-    </tr>`;
-  }).join('');
+function landingBrandMatchesSku(def, sku) {
+  const s = sku.toLowerCase();
+  return def.terms.some(t => s.includes(t));
+}
 
-  const presentCount = accounts.filter(acct => filterItems(DATA.accounts[acct] || [], skuFilterTexts).length > 0).length;
-  const filterDescription = skuFilterTexts.length
-    ? skuFilterTexts.map(escapeHtml).join(', ')
-    : (activeCategories.size ? [...activeCategories].map(escapeHtml).join(', ') : 'All SKUs');
+// Deliberately ignores activeCategories/the SKU filter -- this is a structural "who stocks this
+// brand at all" fact, not a browsing view, so it shouldn't silently shift depending on which
+// display filters happen to be toggled (same reasoning as the Share of Shelf category-filter fix).
+// Does respect accountsForTypeFilter() (Region/Type/Account Manager), same as every other view.
+function computeBrandPenetration(accounts) {
+  return LANDING_BRAND_DEFS.map(def => {
+    let count = 0;
+    accounts.forEach(acct => {
+      const items = DATA.accounts[acct] || [];
+      if (items.some(i => i.side === 'Ours' && landingBrandMatchesSku(def, i.sku))) count++;
+    });
+    const pct = accounts.length ? (count / accounts.length) * 100 : 0;
+    return { name: def.name, count, pct };
+  }).sort((a, b) => b.pct - a.pct);
+}
 
-  content.innerHTML = `
+function renderBrandChartHtml(accounts) {
+  const brands = computeBrandPenetration(accounts);
+  const topBrand = brands[0];
+  const rows = brands.map(b => `
+    <div class="brand-chart-row">
+      <div class="brand-chart-label">${escapeHtml(b.name)} — ${b.pct.toFixed(1)}% (${b.count} of ${accounts.length} accounts)</div>
+      <div class="brand-chart-bar"><div class="brand-chart-fill" style="width:${b.pct}%"></div></div>
+    </div>
+  `).join('');
+
+  return `
     <div class="card">
-      <h2 class="section-title">${typeLabel} Accounts — ${filterDescription}</h2>
-      <div class="share-meta" style="margin-bottom:14px;">${presentCount} of ${accounts.length} ${typeLabel} accounts carry this</div>
-      <div style="overflow-x:auto;">
-        <table class="all-accounts-table">
-          <thead><tr><th>Account</th><th>Status</th></tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
+      <h2 class="section-title">Brand Penetration</h2>
+      <div class="activity-stats-row" style="margin-bottom:18px;">
+        <div class="activity-stat"><div class="activity-stat-num">${accounts.length}</div><div class="activity-stat-label">Total Accounts</div></div>
+        <div class="activity-stat"><div class="activity-stat-num">${brands.length}</div><div class="activity-stat-label">Brands Tracked</div></div>
+        <div class="activity-stat"><div class="activity-stat-num" style="font-size:1.4rem;">${topBrand ? escapeHtml(topBrand.name) : '—'}</div><div class="activity-stat-label">Top Brand by Reach</div></div>
       </div>
+      ${rows}
     </div>
   `;
+}
+
+// A matched account can carry several variants of the picked brand at once (e.g. both
+// "Beausoleil Rose" and "Beausoleil White") -- condenses them onto one line by stripping
+// whatever word prefix all of that account's matched sku names share, so "Beausoleil Rose,
+// Beausoleil White" reads as "Rose, White" instead of three redundant repeats of the brand name.
+// Falls back to the full sku names whenever there's nothing meaningful to strip (a single match,
+// no shared prefix, or one match that IS just the bare brand name).
+function condenseVariantLabels(items) {
+  const skus = items.map(i => i.sku);
+  if (skus.length <= 1) return skus.map(escapeHtml).join(', ');
+  const tokenLists = skus.map(s => s.trim().split(/\s+/));
+  const minLen = Math.min(...tokenLists.map(t => t.length));
+  let prefixLen = 0;
+  outer:
+  for (let i = 0; i < minLen; i++) {
+    const word = tokenLists[0][i].toLowerCase();
+    for (const t of tokenLists) { if (t[i].toLowerCase() !== word) break outer; }
+    prefixLen++;
+  }
+  if (prefixLen === 0) return skus.map(escapeHtml).join(', ');
+  const stripped = tokenLists.map(t => t.slice(prefixLen).join(' ').trim());
+  if (stripped.some(s => !s)) return skus.map(escapeHtml).join(', ');
+  return stripped.map(escapeHtml).join(', ');
+}
+
+// A single representative price per item for range purposes -- bottle price when set, otherwise
+// the glass price, matching how the rest of the app treats a by-glass-only item as still having
+// "a price" even with no bottle price on file.
+function representativePrice(item) {
+  if (item.price != null) return item.price;
+  if (item.byGlass && item.glassPrice != null) return item.glassPrice;
+  return null;
+}
+
+function priceRangeLabel(items) {
+  const prices = items.map(representativePrice).filter(p => p != null);
+  if (!prices.length) return '<span class="no-price">No price set</span>';
+  const min = Math.min(...prices), max = Math.max(...prices);
+  return min === max ? fmtPrice(min) : `${fmtPrice(min)} – ${fmtPrice(max)}`;
+}
+
+function renderSkuLookupHtml(accounts, skuFilterTexts) {
+  const brandLabel = skuFilterTexts.map(escapeHtml).join(', ');
+  const carrying = [];
+  const notCarrying = [];
+  accounts.forEach(acct => {
+    const matches = filterItems(DATA.accounts[acct] || [], skuFilterTexts);
+    if (matches.length > 0) carrying.push({ acct, matches });
+    else notCarrying.push(acct);
+  });
+  carrying.sort((a, b) => a.acct.localeCompare(b.acct));
+  notCarrying.sort((a, b) => a.localeCompare(b));
+
+  const pct = accounts.length ? (carrying.length / accounts.length) * 100 : 0;
+
+  const carryRows = carrying.map(({ acct, matches }) => `
+    <div class="carry-row">
+      <span class="carry-check">✓</span>
+      <span class="carry-account jump-to-account" data-account="${escapeHtml(acct)}">${escapeHtml(acct)}</span>
+      <span class="carry-variants">${condenseVariantLabels(matches)}</span>
+      <span class="carry-price">${priceRangeLabel(matches)}</span>
+    </div>
+  `).join('');
+
+  const notCarryItems = notCarrying.map(acct => `
+    <span class="not-carry-item jump-to-account" data-account="${escapeHtml(acct)}">${escapeHtml(acct)}</span>
+  `).join('');
+
+  return `
+    <div class="card">
+      <div class="sku-lookup-header">
+        <div class="sku-lookup-stat" style="color:var(--ours);">${brandLabel} — ${carrying.length} of ${accounts.length} accounts carry this — ${pct.toFixed(1)}%</div>
+      </div>
+      <div class="bar-track" style="margin-bottom:18px;"><div class="bar-ours" style="width:${pct}%"></div></div>
+
+      <div class="sku-lookup-section-title">Carrying (${carrying.length})</div>
+      ${carrying.length ? `<div class="carry-list">${carryRows}</div>` : '<div class="empty-msg">No accounts carry this yet.</div>'}
+
+      <div class="sku-lookup-section-title">Not Carrying (${notCarrying.length})</div>
+      ${notCarrying.length ? `<div class="not-carry-list">${notCarryItems}</div>` : '<div class="empty-msg">Every account carries this.</div>'}
+    </div>
+  `;
+}
+
+function renderAllAccountsComparison() {
+  const skuFilterTexts = orderedActiveSkuNames();
+  const accounts = accountsForTypeFilter().sort((a, b) => a.localeCompare(b));
+
+  const chartHtml = renderBrandChartHtml(accounts);
+  const lookupHtml = skuFilterTexts.length ? renderSkuLookupHtml(accounts, skuFilterTexts) : '';
+
+  content.innerHTML = chartHtml + lookupHtml;
 
   content.querySelectorAll('.jump-to-account').forEach(cell => {
     cell.addEventListener('click', () => {
