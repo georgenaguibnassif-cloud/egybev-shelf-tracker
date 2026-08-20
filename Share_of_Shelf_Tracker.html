@@ -3024,12 +3024,13 @@ function renderAllAccountsComparison() {
 
   const chartHtml = renderBrandChartHtml(accounts);
   const lookupHtml = skuFilterTexts.length ? renderSkuLookupHtml(accounts, skuFilterTexts) : '';
+  const pairCoverageHtml = renderBrandPairCoverageWidgetHtml(accounts);
   const shareHtml = renderShareOfShelfWidgetHtml(accounts);
   const zeroHtml = renderZeroEgyBevWidgetHtml(accounts);
   const missingPricesHtml = renderMissingPricesWidgetHtml(accounts);
   const compositionHtml = renderTerritoryCompositionWidgetHtml(accounts);
 
-  content.innerHTML = chartHtml + lookupHtml + shareHtml + zeroHtml + missingPricesHtml + compositionHtml;
+  content.innerHTML = chartHtml + lookupHtml + pairCoverageHtml + shareHtml + zeroHtml + missingPricesHtml + compositionHtml;
 
   content.querySelectorAll('.jump-to-account').forEach(cell => {
     cell.addEventListener('click', () => {
@@ -3261,10 +3262,12 @@ function renderOverview() {
 // two comparisons).
 const BRAND_PAIRS = [
   { ours: 'Shahrazade', theirs: 'Omar Khayyam' },
+  { ours: 'Shahrazade', theirs: '365' },
   { ours: 'Le Baron', theirs: 'Chateau de Granville', theirsCategory: 'Sparkling' },
   { ours: 'Lavita', theirs: 'Aida Valmont' },
   { ours: 'Aria', theirs: 'Aida Valmont' },
   { ours: 'Nala', theirs: 'Cape Bay' },
+  { ours: 'Baila', theirs: 'Chateau de Granville', theirsCategory: 'Wine' },
   { ours: 'Chateau Byblos', theirs: 'Cape Bay' },
   { ours: 'Beausoleil', theirs: 'CGM' },
   { ours: 'Jardin du Nil', theirs: 'Castello di Trevi' }
@@ -3274,7 +3277,7 @@ const BRAND_PAIRS = [
 // BRAND_PAIRS declaration order. Any category without an explicit list here (or any pair
 // somehow missing from its category's list) just falls back to BRAND_PAIRS order at the end.
 const BRAND_PAIR_ORDER = {
-  Wine: ['Shahrazade', 'Beausoleil', 'Jardin du Nil', 'Chateau Byblos', 'Nala'],
+  Wine: ['Shahrazade', 'Beausoleil', 'Jardin du Nil', 'Chateau Byblos', 'Nala', 'Baila'],
   Sparkling: ['Lavita', 'Aria', 'Le Baron']
 };
 
@@ -3401,6 +3404,93 @@ function accountBrandPairSectionHtml(items) {
       <h2 class="section-title">Brand Match-ups</h2>
       ${sectionsHtml}
     </div>`;
+}
+
+/* ---- Brand Match-up Coverage (territory-wide, landing screen) ---- */
+
+// Reuses the SAME 9 curated pairs (BRAND_PAIRS) and the same brand matching
+// (skuMatchesBrandOrAlias) as the per-account Brand Match-ups card and Market Reading above --
+// this is a coverage rollup of those pairs across the current filter scope, deliberately a
+// separate system from LANDING_BRAND_DEFS (which tracks every EgyBev/ABC brand individually for
+// the Brand Penetration chart, with no "vs" pairing concept at all).
+//
+// Ignores activeCategories/the SKU filter for the same reason computeBrandPenetration does --
+// "how many accounts carry this brand" is a structural fact, not a browsing view. Does respect
+// accountsForTypeFilter() (Region/Type/Account Manager).
+function computeBrandPairCoverage(accounts) {
+  const total = accounts.length;
+  return BRAND_PAIRS.map(pair => {
+    let oursCount = 0, theirsCount = 0;
+    accounts.forEach(acct => {
+      const items = DATA.accounts[acct] || [];
+      if (items.some(i => i.side === 'Ours' && skuMatchesBrandOrAlias(i.sku, pair.ours))) oursCount++;
+      if (items.some(i => i.side === 'Heineken'
+        && skuMatchesBrandOrAlias(i.sku, pair.theirs)
+        && (!pair.theirsCategory || i.category === pair.theirsCategory))) theirsCount++;
+    });
+    const label = pair.theirsCategory ? `${pair.ours} vs ${pair.theirs} (${pair.theirsCategory})` : `${pair.ours} vs ${pair.theirs}`;
+    return {
+      pair, label, oursCount, theirsCount,
+      oursPct: total ? (oursCount / total) * 100 : 0,
+      theirsPct: total ? (theirsCount / total) * 100 : 0
+    };
+  });
+}
+
+// Two bars per pair (EgyBev / ABC), each independently scaled to its own share of the filtered
+// account count -- same "% of accounts carrying this" reading as the Brand Penetration chart's
+// bars, just presented per match-up instead of a flat list. Reuses the exact share-cat-* markup
+// built for the Share of Shelf widget's Wine/Sparkling bars (one label row + two side-colored bars).
+function brandPairCoverageRowHtml(row) {
+  return `
+    <div class="share-cat-row">
+      <div class="share-cat-name">${escapeHtml(row.label)}</div>
+      <div class="share-cat-bar-row">
+        <div class="share-cat-label">${escapeHtml(row.pair.ours)} — ${row.oursCount} account${row.oursCount === 1 ? '' : 's'} (${row.oursPct.toFixed(1)}%)</div>
+        <div class="share-cat-bar"><div class="share-cat-fill-ours" style="width:${row.oursPct}%"></div></div>
+      </div>
+      <div class="share-cat-bar-row">
+        <div class="share-cat-label">${escapeHtml(row.pair.theirs)} — ${row.theirsCount} account${row.theirsCount === 1 ? '' : 's'} (${row.theirsPct.toFixed(1)}%)</div>
+        <div class="share-cat-bar"><div class="share-cat-fill-hein" style="width:${row.theirsPct}%"></div></div>
+      </div>
+    </div>`;
+}
+
+function renderBrandPairCoverageWidgetHtml(accounts) {
+  const rows = computeBrandPairCoverage(accounts);
+
+  // Filter + stable-sort by BRAND_PAIR_ORDER position, NOT a name-keyed Map lookup -- Shahrazade
+  // now anchors two Wine pairs (vs Omar Khayyam, vs 365), so a Map keyed by bare `pair.ours` would
+  // collide and silently drop one of them, the same bug class the picker fix above addresses.
+  // Ties (both Shahrazade rows share one BRAND_PAIR_ORDER index) keep their relative BRAND_PAIRS
+  // declaration order via Array.sort's stability -- same convention accountBrandPairSectionHtml
+  // already relies on for its own ordering.
+  const sectionsHtml = ['Wine', 'Sparkling'].map(sectionLabel => {
+    const orderList = BRAND_PAIR_ORDER[sectionLabel] || [];
+    const sectionRows = rows
+      .filter(r => orderList.includes(r.pair.ours))
+      .sort((a, b) => orderList.indexOf(a.pair.ours) - orderList.indexOf(b.pair.ours));
+    if (!sectionRows.length) return '';
+    return `
+      <div class="sku-filter-group-title">${escapeHtml(sectionLabel)}</div>
+      ${sectionRows.map(brandPairCoverageRowHtml).join('')}
+    `;
+  }).join('');
+
+  return `
+    <div class="card">
+      <h2 class="section-title">Brand Match-up Coverage</h2>
+      <div class="activity-stats-row" style="margin-bottom:18px;">
+        <div class="activity-stat"><div class="activity-stat-num">${accounts.length}</div><div class="activity-stat-label">Total Accounts</div></div>
+        <div class="activity-stat"><div class="activity-stat-num">${rows.length}</div><div class="activity-stat-label">Pairs Tracked</div></div>
+      </div>
+      <div class="legend" style="margin-top:0; margin-bottom:14px;">
+        <span><span class="dot ours"></span>${OURS_LABEL}</span>
+        <span><span class="dot heineken"></span>${HEINEKEN_LABEL}</span>
+      </div>
+      ${sectionsHtml}
+    </div>
+  `;
 }
 
 /* ---- Market Reading (which accounts stock ABC brands we have no answer to) ---- */
@@ -3783,9 +3873,14 @@ function renderMarketReadingResults() {
 // carry theirsCategory='Sparkling'. Purely cosmetic: doesn't touch checkbox behavior, matching,
 // or the "vs" labels -- anything not listed here still renders, just ungrouped at the end, so a
 // future BRAND_PAIRS addition can never silently disappear from the picker.
+//
+// Entries are keyed the same way abcCompetitiveSet() keys its own entries ("theirs|category",
+// with "*" standing in for no category restriction) rather than by bare brand name -- Chateau de
+// Granville now has two distinct entries (Sparkling and Wine), so a bare-name key would collide
+// and silently drop one of them from the picker.
 const MR_PICKER_GROUPS = [
-  { label: 'Sparkling', theirs: ['Aida Valmont', 'Chateau de Granville'] },
-  { label: 'Wine', theirs: ['Cape Bay', 'Castello di Trevi', 'CGM', 'Omar Khayyam'] }
+  { label: 'Sparkling', keys: ['Aida Valmont|*', 'Chateau de Granville|Sparkling'] },
+  { label: 'Wine', keys: ['Cape Bay|*', 'Castello di Trevi|*', 'CGM|*', 'Omar Khayyam|*', '365|*', 'Chateau de Granville|Wine'] }
 ];
 
 function marketReadingPickerCheckboxHtml(e) {
@@ -3793,10 +3888,10 @@ function marketReadingPickerCheckboxHtml(e) {
 }
 
 function marketReadingPickerGroupsHtml(entries) {
-  const byTheirs = new Map(entries.map(e => [e.theirs, e]));
+  const byKey = new Map(entries.map(e => [e.key, e]));
   const used = new Set();
   const groupsHtml = MR_PICKER_GROUPS.map(g => {
-    const groupEntries = g.theirs.map(name => byTheirs.get(name)).filter(Boolean);
+    const groupEntries = g.keys.map(key => byKey.get(key)).filter(Boolean);
     groupEntries.forEach(e => used.add(e.key));
     if (!groupEntries.length) return '';
     return `<div class="sku-filter-group"><div class="sku-filter-group-title">${escapeHtml(g.label)}</div>${groupEntries.map(marketReadingPickerCheckboxHtml).join('')}</div>`;
