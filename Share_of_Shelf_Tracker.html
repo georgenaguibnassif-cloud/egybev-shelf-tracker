@@ -2214,8 +2214,17 @@ function renderAccountView() {
   const heinVisible = filterItems(heinAll, skuFilterTexts);
   const otherVisible = filterItems(otherAll, skuFilterTexts);
 
-  const filteredStats = getFilteredAccountStats(account);
-  const sharePctNum = filteredStats.share * 100;
+  // The headline Share of Shelf % and the "X EgyBev · Y ABC" count read directly from the same
+  // oursVisible/heinVisible arrays used to render the EgyBev/ABC columns below -- one filtered
+  // list, not a second independent calculation. Previously this called getFilteredAccountStats(),
+  // which deliberately ignores the category checkboxes (by design, for the Overview table and
+  // landing-page aggregates, where there's no on-screen SKU list to visibly drift against) -- but
+  // on THIS page the checkboxes and the filtered SKU columns are right there together, so a
+  // mismatched stat reads as broken. Toggling a category checkbox re-runs render() and this whole
+  // function, so the numbers stay live in sync with the checkboxes automatically.
+  const oursCount = oursVisible.length;
+  const heinCount = heinVisible.length;
+  const sharePctNum = (oursCount + heinCount) > 0 ? (oursCount / (oursCount + heinCount)) * 100 : 0;
   const sharePct = sharePctNum.toFixed(1);
 
   // Whether THIS account's owner is the signed-in user (or they're a Manager/Owner) --
@@ -2292,7 +2301,7 @@ function renderAccountView() {
           <div class="bar-track">
             <div class="bar-ours" style="width:${sharePct}%"></div>
           </div>
-          <div class="share-meta">${filteredStats.ours} ${OURS_LABEL} &middot; ${filteredStats.heineken} ${HEINEKEN_LABEL}</div>
+          <div class="share-meta">${oursCount} ${OURS_LABEL} &middot; ${heinCount} ${HEINEKEN_LABEL}</div>
         </div>
         <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
           ${viewMenuBtn}
