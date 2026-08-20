@@ -3288,10 +3288,13 @@ function skuMatchesBrand(sku, brand) {
 // Alternate spellings of the SAME brand as they actually appear in menu data. A plain
 // substring test silently misses all of these, which made real stock look absent and inflated
 // the "we have no answer here" count:
-//   "La Vita Frizzante White" does not contain "Lavita"      (space)
-//   "Valmont White"           does not contain "Aida Valmont" (missing prefix)
-//   bare "Castello"           does not contain "Castello di Trevi"
-//   "Chateau Granville Red"   does not contain "Chateau de Granville" (missing "de")
+//   "La Vita Frizzante White"      does not contain "Lavita"      (space)
+//   "Valmont White"                does not contain "Aida Valmont" (missing prefix)
+//   bare "Castello"                does not contain "Castello di Trevi"
+//   "Chateau Granville Red"        does not contain "Chateau de Granville" (missing "de")
+//   "Chateau Du Granville (...)"   does not contain either of the above ("Du", not "de", and no
+//                                    "Granville Red"-style bare form -- 2 rows total, found while
+//                                    spot-checking the Baila/Chateau de Granville pair)
 //   nothing at all contains "CGM" -- it's listed as Grand Marquis (confirmed with the user),
 //     and "Grand Marguls" is a misspelling that propagated through the Cairo import
 // Terms are matched with the same substring test, so the SHORTEST distinctive form is used
@@ -3301,7 +3304,7 @@ const BRAND_ALIASES = {
   'Lavita': ['Lavita', 'La Vita'],
   'Aida Valmont': ['Valmont'],
   'Castello di Trevi': ['Castello', 'Castillo di Trevi'],
-  'Chateau de Granville': ['Chateau de Granville', 'Chateau Granville'],
+  'Chateau de Granville': ['Chateau de Granville', 'Chateau Granville', 'Chateau Du Granville'],
   'CGM': ['CGM', 'Grand Marquis', 'Grand Marguls']
 };
 
